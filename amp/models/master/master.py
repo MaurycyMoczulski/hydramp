@@ -1,5 +1,4 @@
 from typing import Any, Dict, Optional, List
-
 import tensorflow as tf
 from amp.layers import vae_loss
 from amp.models import model as amp_model
@@ -13,6 +12,37 @@ from amp.models.encoders import encoder as enc
 from amp.utils import metrics
 from keras import backend as K
 from keras import layers, models, optimizers, losses
+import keras
+
+
+class OutputLayer(keras.layers.Layer):
+    def __init__(self, kernel_size, latent_dim):
+        super(OutputLayer, self).__init__()
+        self.kernel_size = kernel_size
+        self.latent_dim = latent_dim
+
+    def build(self, input_shape):
+        self.amp_kernel = self.add_weight(name='amp_kernel',
+                                    shape=(1, self.kernel_size),
+                                    initializer='uniform',
+                                    trainable=True)
+        self.mic_kernel = self.add_weight(name='mic_kernel',
+                                    shape=(1, self.kernel_size),
+                                    initializer='uniform',
+                                    trainable=True)
+        super(OutputLayer, self).build(input_shape)
+
+    def call(self, z):
+        max_layer = layers.GlobalMaxPooling1D(data_format='channels_first')
+        slice_layers = [layers.Lambda(lambda x: x[:, i:i + self.kernel_size], name='slice_layer')
+                        for i in range(z.shape[-1] - self.kernel_size)]
+        reshape = layers.Reshape((1, self.latent_dim - self.kernel_size))
+        slices = [layer(z) for layer in slice_layers]
+        amp_output = max_layer(reshape(tf.concat([layers.Dot(axes=-1, normalize=True)([a, self.amp_kernel])
+                                                  for a in slices], axis=-1)))
+        mic_output = max_layer(reshape(tf.concat([layers.Dot(axes=-1, normalize=False)([a, self.mic_kernel])
+                                                  for a in slices], axis=-1)))
+        return tf.concat([amp_output, mic_output], axis=-1)
 
 
 class MasterAMPTrainer(amp_model.Model):
@@ -36,6 +66,9 @@ class MasterAMPTrainer(amp_model.Model):
         self.rcl_weight = rcl_weight
         self.master_optimizer = master_optimizer
         self.loss_weights = loss_weights
+        self.latent_dim = self.encoder.latent_dim
+        self.kernel_size = int(self.latent_dim / 2)
+        self.output_layer = OutputLayer(kernel_size=self.kernel_size, latent_dim=self.latent_dim)
 
     @staticmethod
     def sampling(input_: Optional[Any] = None):
@@ -52,47 +85,30 @@ class MasterAMPTrainer(amp_model.Model):
         z_mean, z_sigma, z = self.encoder.output_tensor(sequences_input)
         mic_in = layers.Input(shape=(1,), name="mic_in")
         amp_in = layers.Input(shape=(1,), name="amp_in")
-        sleep_mic_in = layers.Input(shape=(1,), name="sleep_mic_in")
-        sleep_amp_in = layers.Input(shape=(1,), name="sleep_amp_in")
         # noise_in is a noise applied to sampled z, must be defined as input to model
         noise_in = layers.Input(shape=(64,), name="noise_in")
 
         z = layers.Lambda(self.sampling, output_shape=(64,), name="z")
         z = z([noise_in, z_mean, z_sigma])
-        z_cond = layers.concatenate([z, amp_in, mic_in], name="z_cond")
-
-        reconstructed = self.decoder.output_tensor(z_cond)
-        amp_output = self.amp_classifier.output_tensor_with_dense_input(input_=reconstructed)
-        mic_output = self.mic_classifier.output_tensor_with_dense_input(input_=reconstructed)
-        z_cond_reconstructed = self.encoder.output_tensor_with_dense_input(reconstructed)[0]
-        z_cond_reconstructed_error = layers.Subtract(name="z_cond_reconstructed_error")([z, z_cond_reconstructed])
+        reconstructed = self.decoder.output_tensor(z)
+        z_reconstructed = self.encoder.output_tensor_with_dense_input(reconstructed)[0]
+        z_reconstructed_error = layers.Subtract(name="z_reconstructed_error")([z, z_reconstructed])
         # end of cvae
-        sleep_z_cond = layers.concatenate([z, sleep_amp_in, sleep_mic_in], name='sleep_z_cond')
-        sleep_reconstructed = self.decoder.output_tensor(sleep_z_cond)
-        sleep_cond_reconstructed = self.encoder.output_tensor_with_dense_input(sleep_reconstructed)[0]
-        sleep_cond_reconstructed_error = layers.Subtract(name="correction_sleep_cond_reconstructed_error")(
-            [z, sleep_cond_reconstructed])
 
-        unconstrained_sleep_z_cond = layers.concatenate([noise_in, sleep_amp_in, sleep_mic_in],
-                                                        name="unconstrained_sleep_z_cond")
-        unconstrained_sleep_reconstructed = self.decoder.output_tensor(unconstrained_sleep_z_cond)
-        unconstrained_sleep_cond_reconstructed = \
-            self.encoder.output_tensor_with_dense_input(unconstrained_sleep_reconstructed)[0]
-        unconstrained_sleep_cond_reconstructed_error = layers.subtract(
-            [noise_in, unconstrained_sleep_cond_reconstructed], name="unconstrained_sleep_cond_reconstructed_error")
+        unconstrained_z = noise_in
+        unconstrained_reconstructed = self.decoder.output_tensor(unconstrained_z)
+        z_unconstrained_reconstructed = \
+            self.encoder.output_tensor_with_dense_input(unconstrained_reconstructed)[0]
+        unconstrained_reconstructed_error = layers.subtract(
+            [noise_in, z_unconstrained_reconstructed], name="z_unconstrained_reconstructed_error")
 
-        sleep_amp_output = self.amp_classifier.output_tensor_with_dense_input(input_=sleep_reconstructed)
-        unconstrained_sleep_amp_output = self.amp_classifier.output_tensor_with_dense_input(
-            input_=unconstrained_sleep_reconstructed,
-        )
-
-        sleep_mic_output = self.mic_classifier.output_tensor_with_dense_input(input_=sleep_reconstructed)
-        unconstrained_sleep_mic_output = self.mic_classifier.output_tensor_with_dense_input(
-            input_=unconstrained_sleep_reconstructed,
-        )
-
+        out = self.output_layer(z)
+        reshape = layers.Reshape((1,))
+        amp_output = layers.Lambda(lambda x: reshape(x[:, 0]))(out)
+        mic_output = layers.Lambda(lambda x: reshape(x[:, 1]))(out)
         # CLASSIFIERS NAME wrappers
         # in order to appropriately name each output an identity layer lambda wrapper is added
+
         def idn_f(x_):
             return x_
 
@@ -100,16 +116,6 @@ class MasterAMPTrainer(amp_model.Model):
             layers.Lambda(idn_f, name="amp_prediction")(amp_output)
         mic_output_wrap = \
             layers.Lambda(idn_f, name="mic_prediction")(mic_output)
-
-        correction_sleep_amp_output_wrap = \
-            layers.Lambda(idn_f, name="correction_sleep_amp_prediction")(sleep_amp_output)
-        correction_sleep_mic_output_wrap = \
-            layers.Lambda(idn_f, name="correction_sleep_mic_prediction")(sleep_mic_output)
-
-        unconstrained_sleep_amp_output_wrap = \
-            layers.Lambda(idn_f, name="unconstrained_sleep_amp_prediction")(unconstrained_sleep_amp_output)
-        unconstrained_sleep_mic_output_wrap = \
-            layers.Lambda(idn_f, name="unconstrained_sleep_mic_prediction")(unconstrained_sleep_mic_output)
 
         # GRADS ----------------------------------------------------------------------------------------------
         # Every value of target Sobolev grad must be provided as input to the graph because of Keras mechanics
@@ -134,47 +140,6 @@ class MasterAMPTrainer(amp_model.Model):
             name="amp_mean_grad"
         )
 
-        unconstrained_sleep_mic_output_grad  = K.gradients(
-            loss=unconstrained_sleep_mic_output,
-            variables=[noise_in]
-        )[0]
-
-        unconstrained_sleep_amp_output_grad  = K.gradients(
-            loss=unconstrained_sleep_amp_output,
-            variables=[noise_in]
-        )[0]
-
-        unconstrained_sleep_mic_output_grad_input = layers.Input(
-            tensor=tf.math.scalar_mul(self.decoder.activation.temperature, unconstrained_sleep_mic_output_grad),
-            name="unconstrained_sleep_mic_output_grad_input"
-        )
-
-        unconstrained_sleep_amp_output_grad_input = layers.Input(
-            tensor=tf.math.scalar_mul(self.decoder.activation.temperature, unconstrained_sleep_amp_output_grad),
-            name="unconstrained_sleep_amp_output_grad_input"
-        )
-        # TODO: gradient w.r.t to input?
-
-        correction_sleep_mic_output_grad = K.gradients(
-            loss=sleep_mic_output,
-            variables=[z_mean]
-        )[0]
-
-        correction_sleep_amp_output_grad = K.gradients(
-            loss=sleep_amp_output,
-            variables=[z_mean]
-        )[0]
-
-        correction_sleep_mic_output_grad_input = layers.Input(
-            tensor=tf.math.scalar_mul(self.decoder.activation.temperature, correction_sleep_mic_output_grad),
-            name="correction_sleep_mic_output_grad"
-        )
-
-        correction_sleep_amp_output_grad_input = layers.Input(
-            tensor=tf.math.scalar_mul(self.decoder.activation.temperature, correction_sleep_amp_output_grad),
-            name="correction_sleep_amp_output_grad"
-        )
-
         y = vae_loss.VAELoss(
             kl_weight=self.kl_weight,
             rcl_weight=self.rcl_weight,
@@ -188,12 +153,6 @@ class MasterAMPTrainer(amp_model.Model):
                 noise_in,
                 mic_mean_grad_input,
                 amp_mean_grad_input,
-                unconstrained_sleep_mic_output_grad_input,
-                unconstrained_sleep_amp_output_grad_input,
-                correction_sleep_mic_output_grad_input,
-                correction_sleep_amp_output_grad_input,
-                sleep_amp_in,
-                sleep_mic_in,
             ],
             outputs=[
                 amp_output_wrap,
@@ -201,17 +160,8 @@ class MasterAMPTrainer(amp_model.Model):
                 y,
                 mic_mean_grad_input,
                 amp_mean_grad_input,
-                unconstrained_sleep_mic_output_grad_input,
-                unconstrained_sleep_amp_output_grad_input,
-                correction_sleep_mic_output_grad_input,
-                correction_sleep_amp_output_grad_input,
-                correction_sleep_amp_output_wrap,
-                correction_sleep_mic_output_wrap,
-                unconstrained_sleep_amp_output_wrap,
-                unconstrained_sleep_mic_output_wrap,
-                z_cond_reconstructed_error,
-                sleep_cond_reconstructed_error,
-                unconstrained_sleep_cond_reconstructed_error,
+                z_reconstructed_error,
+                unconstrained_reconstructed_error,
             ]
         )
 
@@ -248,40 +198,22 @@ class MasterAMPTrainer(amp_model.Model):
             optimizer='adam',
             loss=[
                 entropy_smoothed_loss,  # amp - classifier output
-                entropy_smoothed_loss,  # mic - classifier output
+                losses.Huber(),  # mic - classifier output
                 'mae',  # reconstruction
                 losses.Huber(),  # mic_mean_grad_input
                 losses.Huber(),  # amp_mean_grad_input
-                losses.Huber(),  # unconstrained_sleep_mic_output_grad_input
-                losses.Huber(),  # unconstrained_sleep_amp_output_grad_input
-                losses.Huber(),  # correction_sleep_mic_output_grad_input
-                losses.Huber(),  # correction_sleep_amp_output_grad_input
-                entropy_smoothed_loss,  # sleep amp output
-                entropy_smoothed_loss,  # sleep mic output
-                entropy_smoothed_loss,  # unconstrained sleep amp output
-                entropy_smoothed_loss,  # unconstrained sleep mic output
-                'mse',  # z cond reconstructed error
-                'mse',  # sleep cond reconstructed error
-                'mse',  # unconstrained sleep cond reconstructed error
+                'mse',  # z reconstructed error
+                'mse',  # unconstrained reconstructed error
             ],
             loss_weights=self.loss_weights,
             metrics=[
                 ['acc', 'binary_crossentropy'],  # amp - classifier output
-                ['acc', 'binary_crossentropy'],  # mic - classifier output
+                ['mse', losses.Huber()],  # mic - classifier output
                 [_kl_metric, _rcl, _reconstruction_acc, _amino_acc, _empty_acc],  # reconstruction
                 ['mse', losses.Huber()],  # mic_mean_grad_input
                 ['mse', losses.Huber()],  # amp_mean_grad_input
-                ['mse', losses.Huber()],  # unconstrained_sleep_mic_output_grad_input
-                ['mse', losses.Huber()],  # unconstrained_sleep_amp_output_grad_input
-                ['mse', losses.Huber()],  # correction_sleep_mic_output_grad_input
-                ['mse', losses.Huber()],  # correction_sleep_amp_output_grad_input
-                ['acc', 'binary_crossentropy'],  # sleep amp output
-                ['acc', 'binary_crossentropy'],  # sleep mic output
-                ['acc', 'binary_crossentropy'],  # unconstrained sleep amp output
-                ['acc', 'binary_crossentropy'],  # unconstrained sleep mic output
-                ['mse', 'mae'],  # z cond reconstructed error
-                ['mse', 'mae'],  # sleep cond reconstructed error
-                ['mse', 'mae'],  # unconstrained sleep cond reconstructed error
+                ['mse', 'mae'],  # z reconstructed error
+                ['mse', 'mae'],  # unconstrained reconstructed error
 
             ]
         )

@@ -44,15 +44,11 @@ def concatenated_generator(
         result_amp = np.concatenate([batch_amp_y, batch_mic_y, batch_uniprot_y])
         result_mic = np.concatenate([batch_amp_mic, batch_mic_mic, batch_uniprot_mic])
         noise_in = np.random.normal(0, 1.0, size=(result_amp.shape[0], 64))
-        sleep_mic = np.random.choice([0, 1], size=result_amp.shape, p=[0.5, 0.5])
-        sleep_amp = sleep_mic
         yield [
                   result_x,
                   result_amp,
                   result_mic,
-                  noise_in,
-                  sleep_amp,
-                  sleep_mic,
+                  noise_in
         ], \
               [
                   result_amp, # classifier output
@@ -60,15 +56,6 @@ def concatenated_generator(
                   np.zeros_like(result_amp), # reconstruction
                   np.zeros_like(noise_in),  # regressor_mean_grad_input
                   np.zeros_like(noise_in),  # classifier_mean_grad_input
-                  np.zeros_like(noise_in),  # unconstrained_sleep_regressor_output_grad_input
-                  np.zeros_like(noise_in),  # unconstrained_sleep_classifier_output_grad_input
-                  np.zeros_like(noise_in),  # correction_sleep_regressor_output_grad_input
-                  np.zeros_like(noise_in),  # correction_sleep_classifier_output_grad_input
-                  sleep_amp, # sleep classifier output
-                  sleep_mic, # sleep regressor output
-                  sleep_amp,  # unconstrained sleep classifier output
-                  sleep_mic, # unconstrained sleep regressor output
-                  np.zeros_like(noise_in), # z cond reconstructed error
-                  np.zeros_like(noise_in), # sleep cond reconstructed error
-                  np.zeros_like(noise_in), # unconstrained sleep cond reconstructed error
+                  np.zeros_like(noise_in), # reconstructed error
+                  np.zeros_like(noise_in), # unconstrained reconstructed error
               ]

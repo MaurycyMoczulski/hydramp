@@ -19,16 +19,7 @@ hydra = [
     1.0,  # reconstruction
     0.10,  # regressor_mean_grad_input
     0.10,  # classifier_mean_grad_input
-    0.05,  # unconstrained_sleep_regressor_output_grad_input
-    0.05,  # unconstrained_sleep_classifier_output_grad_input
-    0.05,  # correction_sleep_regressor_output_grad_input
-    0.05,  # correction_sleep_classifier_output_grad_input
-    0.05,  # correction sleep classifier output
-    0.05,  # correction sleep regressor output
-    0.05,  # unconstrained sleep classifier output
-    0.05,  # unconstrained sleep regressor output
     0.10,  # z cond reconstructed error
-    0.05,  # correction sleep cond reconstructed error
     0.05,  # unconstrained sleep cond reconstructed error
 ]
 

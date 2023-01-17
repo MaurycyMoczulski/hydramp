@@ -19,6 +19,7 @@ class VAECallback(Callback):
             decoder,
             amp_classifier,
             mic_classifier,
+            output_layer,
             kl_annealrate: float = KL_ANNEALRATE,
             max_kl: float = MAX_KL,
             kl_weight=backend.variable(MIN_KL, name="kl_weight"),
@@ -29,6 +30,7 @@ class VAECallback(Callback):
     ):
         self.encoder = encoder
         self.decoder = decoder
+        self.output_layer = output_layer
         self.amp_classifier = amp_classifier
         self.mic_classifier = mic_classifier
         self.kl_annealrate = kl_annealrate
@@ -45,22 +47,21 @@ class VAECallback(Callback):
         self.negative_mic = self.mic_classifier.predict(self.negative_callback_sample.reshape(1, 25))
 
     def on_epoch_end(self, epoch, logs={}):
+        # TODO
         alphabet = list('ACDEFGHIKLMNPQRSTVWY')
         new_kl = np.min([backend.get_value(self.kl_weight) * np.exp(self.kl_annealrate * epoch), self.max_kl])
         backend.set_value(self.kl_weight, new_kl)
 
         pos_encoded_sample = self.encoder.predict(self.positive_callback_sample)
         neg_encoded_sample = self.encoder.predict(self.negative_callback_sample)
-        pos_sample = np.concatenate([pos_encoded_sample, np.array([[1]]), np.array(self.positive_mic)], axis=1)
-        neg_sample = np.concatenate([neg_encoded_sample, np.array([[0]]), np.array(self.negative_mic)], axis=1)
-        pos_prediction = self.decoder.predict(pos_sample)
-        neg_prediction = self.decoder.predict(neg_sample)
+        pos_prediction = self.decoder.predict(pos_encoded_sample)
+        neg_prediction = self.decoder.predict(neg_encoded_sample)
         pos_peptide = ''.join([alphabet[el - 1] if el != 0 else "'" for el in pos_prediction[0].argmax(axis=1)])
         neg_peptide = ''.join([alphabet[el - 1] if el != 0 else "'" for el in neg_prediction[0].argmax(axis=1)])
-        pos_class_prob = self.amp_classifier.predict(np.array([pos_prediction[0].argmax(axis=1)]))
-        neg_class_prob = self.amp_classifier.predict(np.array([neg_prediction[0].argmax(axis=1)]))
-        pos_mic_pred = self.mic_classifier.predict(np.array([pos_prediction[0].argmax(axis=1)]))
-        neg_mic_pred = self.mic_classifier.predict(np.array([neg_prediction[0].argmax(axis=1)]))
+        pos_probs = self.output_layer(np.array([pos_prediction[0].argmax(axis=1)]))
+        neg_probs = self.output_layer(np.array([neg_prediction[0].argmax(axis=1)]))
+        pos_class_prob, pos_mic_pred = pos_probs[:, 0], pos_probs[:, 1]
+        neg_class_prob, neg_mic_pred = neg_probs[:, 0], neg_probs[:, 1]
 
         new_tau = np.max([backend.get_value(self.tau) * np.exp(- self.tau_annealrate * epoch), self.min_tau])
         backend.set_value(self.tau, new_tau)
