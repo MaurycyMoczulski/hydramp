@@ -6,6 +6,7 @@ MAX_LENGTH = 25
 HIDDEN_DIM = 128
 RCL_WEIGHT = 64
 LATENT_DIM = 64  # latent vector dimension
+K_DIM = 64   # number of gaussian in mixture
 MIN_KL = 1e-4
 MAX_KL = 1e-2
 KL_ANNEALRATE = 0.01

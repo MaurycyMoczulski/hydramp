@@ -58,10 +58,10 @@ class VAECallback(Callback):
         neg_prediction = self.decoder.predict(neg_encoded_sample)
         pos_peptide = ''.join([alphabet[el - 1] if el != 0 else "'" for el in pos_prediction[0].argmax(axis=1)])
         neg_peptide = ''.join([alphabet[el - 1] if el != 0 else "'" for el in neg_prediction[0].argmax(axis=1)])
-        pos_probs = self.output_layer(np.array([pos_prediction[0].argmax(axis=1)]))
-        neg_probs = self.output_layer(np.array([neg_prediction[0].argmax(axis=1)]))
-        pos_class_prob, pos_mic_pred = pos_probs[:, 0], pos_probs[:, 1]
-        neg_class_prob, neg_mic_pred = neg_probs[:, 0], neg_probs[:, 1]
+        pos_probs = self.output_layer.predict(pos_encoded_sample)
+        neg_probs = self.output_layer.predict(neg_encoded_sample)
+        pos_class_prob, pos_mic_pred = pos_probs[0], pos_probs[1]
+        neg_class_prob, neg_mic_pred = neg_probs[0], neg_probs[1]
 
         new_tau = np.max([backend.get_value(self.tau) * np.exp(- self.tau_annealrate * epoch), self.min_tau])
         backend.set_value(self.tau, new_tau)
@@ -69,14 +69,14 @@ class VAECallback(Callback):
         print(
             f'Original positive: GGAGHVPEYFVGIGTPISFYG, \n'
             f'generated: {pos_peptide}, \n'
-            f'AMP probability: {pos_class_prob[0][0]}, \n',
-            f'MIC prediction: {pos_mic_pred[0][0]}. \n'
+            f'AMP probability: {pos_class_prob}, \n',
+            f'MIC prediction: {pos_mic_pred}. \n'
         )
         print(
             f'Original negative: FPSELANMKNALGFFHIGEIF, \n'
             f'generated: {neg_peptide}, \n'
-            f'AMP probability: {neg_class_prob[0][0]}, \n'
-            f'MIC prediction: {neg_mic_pred[0][0]}. \n'
+            f'AMP probability: {neg_class_prob}, \n'
+            f'MIC prediction: {neg_mic_pred}. \n'
         )
 
         print("Current KL weight is " + str(backend.get_value(self.kl_weight)))

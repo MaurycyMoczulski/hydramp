@@ -19,6 +19,7 @@ class AMPEncoder(encoder.Encoder):
             hidden2: layers.Layer,
             dense_z_mean: layers.Layer,
             dense_z_sigma: layers.Layer,
+            dense_k: layers.Layer,
             input_shape: tuple,
             latent_dim: int,
             hidden_dim: int,
@@ -33,6 +34,7 @@ class AMPEncoder(encoder.Encoder):
         self.hidden2 = hidden2
         self.z_mean = dense_z_mean
         self.z_sigma = dense_z_sigma
+        self.k = dense_k
         self.name = name
         self.dense_emb = layers.Dense(self.embedding.output_dim, use_bias=False, name="encoder_dense_emb")
 
@@ -43,8 +45,8 @@ class AMPEncoder(encoder.Encoder):
         z_mean = self.call_layer_on_input(self.z_mean, hidden2)
         z_sigma = self.call_layer_on_input(self.z_sigma, hidden2)
         z = self.call_layer_on_input(layers.Lambda(self.sampling, output_shape=(self.latent_dim,)), ([z_mean, z_sigma]))
-
-        return z_mean, z_sigma, z
+        k = self.call_layer_on_input(self.k, hidden2)
+        return z_mean, z_sigma, z, k
 
     def output_tensor_with_dense_input(self, input_: Optional[Any]):
         if input_ is None:
@@ -65,12 +67,12 @@ class AMPEncoder(encoder.Encoder):
         z_mean = self.call_layer_on_input(self.z_mean, hidden2)
         z_sigma = self.call_layer_on_input(self.z_sigma, hidden2)
         z = self.call_layer_on_input(layers.Lambda(self.sampling, output_shape=(self.latent_dim,)), ([z_mean, z_sigma]))
-
-        return z_mean, z_sigma, z
+        k = self.call_layer_on_input(self.k, hidden2)
+        return z_mean, z_sigma, z, k
 
     def __call__(self, input_=None):
         x = input_ if input_ is not None else layers.Input(shape=(self.input_shape[0],))
-        z_mean, z_sigma, z = self.output_tensor(x)
+        z_mean, z_sigma, z, k = self.output_tensor(x)
         model = models.Model(x, z_mean)
         return model
 
@@ -91,12 +93,12 @@ class AMPEncoder(encoder.Encoder):
 
     def get_layers_with_names(self) -> Dict[str, layers.Layer]:
         return {
-
             f'{self.name}_embedding': self.embedding,
             f'{self.name}_hidden': self.hidden,
             f'{self.name}_hidden2': self.hidden2,
             f'{self.name}_dense_z_mean': self.z_mean,
             f'{self.name}_dense_z_sigma': self.z_sigma,
+            f'{self.name}_dense_k': self.k,
         }
 
     @classmethod
@@ -115,6 +117,7 @@ class AMPEncoder(encoder.Encoder):
             input_shape=config_dict['input_shape'],
             dense_z_mean=layer_collection[config_dict['name'] + '_dense_z_mean'],
             dense_z_sigma=layer_collection[config_dict['name'] + '_dense_z_sigma'],
+            dense_k=layer_collection[config_dict['name'] + '_dense_k'],
         )
 
 
@@ -125,6 +128,7 @@ class AMPEncoderFactory:
             hidden_dim: int,
             latent_dim: int,
             max_length: int,
+            k_dim: int,
     ) -> AMPEncoder:
         emb = layers.Embedding(
             input_dim=21,
@@ -150,6 +154,8 @@ class AMPEncoderFactory:
 
         dense_z_mean = layers.Dense(latent_dim, name="encoder_dense_z_mean")
         dense_z_sigma = layers.Dense(latent_dim, name="encoder_dense_z_sigma")
+        dense_k = layers.Dense(k_dim, name="encoder_dense_k")
+
         return AMPEncoder(
             embedding=emb,
             hidden=hidden,
@@ -159,4 +165,5 @@ class AMPEncoderFactory:
             input_shape=(max_length, 21),
             dense_z_mean=dense_z_mean,
             dense_z_sigma=dense_z_sigma,
+            dense_k=dense_k
         )

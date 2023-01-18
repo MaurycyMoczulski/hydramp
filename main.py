@@ -11,7 +11,7 @@ from amp.utils import basic_model_serializer, callback, generator
 from keras import backend, layers
 from keras.optimizers import Adam
 from sklearn.model_selection import train_test_split
-from amp.config import MIN_LENGTH, MAX_LENGTH, LATENT_DIM, MIN_KL, RCL_WEIGHT, HIDDEN_DIM, MAX_TEMPERATURE
+from amp.config import MIN_LENGTH, MAX_LENGTH, LATENT_DIM, MIN_KL, RCL_WEIGHT, HIDDEN_DIM, MAX_TEMPERATURE, K_DIM
 
 
 config = tf.compat.v1.ConfigProto(
@@ -69,7 +69,7 @@ amp_classifier_model = amp_classifier()
 mic_classifier = bms.load_model('models/mic_classifier/')
 mic_classifier_model = mic_classifier()
 
-encoder = amp_expanded_encoder.AMPEncoderFactory.get_default(HIDDEN_DIM, LATENT_DIM, MAX_LENGTH)
+encoder = amp_expanded_encoder.AMPEncoderFactory.get_default(HIDDEN_DIM, LATENT_DIM, MAX_LENGTH, K_DIM)
 input_to_encoder = layers.Input(shape=(MAX_LENGTH,))
 encoder_model = encoder(input_to_encoder)
 decoder = amp_expanded_decoder.AMPDecoderFactory.build_default(LATENT_DIM, tau, MAX_LENGTH)
@@ -83,6 +83,7 @@ master_model = master.MasterAMPTrainer(
     decoder=decoder,
     kl_weight=kl_weight,
     rcl_weight=RCL_WEIGHT,
+    k_dim=K_DIM,
     master_optimizer=Adam(lr=1e-3),
     loss_weights=hydra,
 )

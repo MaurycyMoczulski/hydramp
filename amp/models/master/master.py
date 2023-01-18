@@ -13,6 +13,7 @@ from amp.utils import metrics
 from keras import backend as K
 from keras import layers, models, optimizers, losses
 import keras
+import numpy as np
 
 
 class OutputLayer(keras.layers.Layer):
@@ -44,6 +45,13 @@ class OutputLayer(keras.layers.Layer):
                                                   for a in slices], axis=-1)))
         return tf.concat([amp_output, mic_output], axis=-1)
 
+    def predict(self, z):
+        slice_layers = [lambda x: x[:, i:i + self.kernel_size] for i in range(z.shape[-1] - self.kernel_size)]
+        slices = [layer(z) for layer in slice_layers]
+        amp_output = np.array([np.dot(a[0], self.amp_kernel[0]) for a in slices]).max()
+        mic_output = np.array([np.dot(a[0], self.mic_kernel[0]) for a in slices]).max()
+        return [amp_output, mic_output]
+
 
 class MasterAMPTrainer(amp_model.Model):
 
@@ -55,6 +63,7 @@ class MasterAMPTrainer(amp_model.Model):
             mic_classifier: disc.Discriminator,
             kl_weight: float,
             rcl_weight: int,
+            k_dim: int,
             master_optimizer: optimizers.Optimizer,
             loss_weights: Optional[List[float]],
     ):
@@ -64,6 +73,7 @@ class MasterAMPTrainer(amp_model.Model):
         self.mic_classifier = mic_classifier
         self.kl_weight = kl_weight
         self.rcl_weight = rcl_weight
+        self.k_dim = k_dim
         self.master_optimizer = master_optimizer
         self.loss_weights = loss_weights
         self.latent_dim = self.encoder.latent_dim
@@ -82,7 +92,7 @@ class MasterAMPTrainer(amp_model.Model):
         self.mic_classifier.freeze_layers()
 
         sequences_input = layers.Input(shape=(input_shape[0],), name="sequences_input")
-        z_mean, z_sigma, z = self.encoder.output_tensor(sequences_input)
+        z_mean, z_sigma, z, k = self.encoder.output_tensor(sequences_input)
         mic_in = layers.Input(shape=(1,), name="mic_in")
         amp_in = layers.Input(shape=(1,), name="amp_in")
         # noise_in is a noise applied to sampled z, must be defined as input to model
@@ -143,7 +153,8 @@ class MasterAMPTrainer(amp_model.Model):
         y = vae_loss.VAELoss(
             kl_weight=self.kl_weight,
             rcl_weight=self.rcl_weight,
-        )([sequences_input, reconstructed, z_mean, z_sigma])
+            k_dim=self.k_dim,
+        )([sequences_input, reconstructed, z_mean, z_sigma, k])
 
         vae = models.Model(
             inputs=[
