@@ -8,7 +8,7 @@ from amp.config import KL_ANNEALRATE, MAX_KL, MAX_LENGTH, MAX_TEMPERATURE, MIN_K
 from amp.data_utils import sequence
 from amp.models.model import Model
 from amp.utils.basic_model_serializer import BasicModelSerializer
-from keras import backend
+from keras import backend as K
 from keras.callbacks import Callback
 
 
@@ -22,8 +22,8 @@ class VAECallback(Callback):
             output_layer,
             kl_annealrate: float = KL_ANNEALRATE,
             max_kl: float = MAX_KL,
-            kl_weight=backend.variable(MIN_KL, name="kl_weight"),
-            tau=backend.variable(MAX_TEMPERATURE, name="temperature "),
+            kl_weight=K.variable(MIN_KL, name="kl_weight"),
+            tau=K.variable(MAX_TEMPERATURE, name="temperature "),
             tau_annealrate=TAU_ANNEALRATE,
             min_tau=MIN_TEMPERATURE,
             max_length: int = MAX_LENGTH,
@@ -31,56 +31,22 @@ class VAECallback(Callback):
         self.encoder = encoder
         self.decoder = decoder
         self.output_layer = output_layer
-        self.amp_classifier = amp_classifier
-        self.mic_classifier = mic_classifier
         self.kl_annealrate = kl_annealrate
         self.max_kl = max_kl
         self.kl_weight = kl_weight
         self.tau = tau
         self.tau_annealrate = tau_annealrate
         self.min_tau = min_tau
-        self.positive_callback_sample = sequence.pad(sequence.to_one_hot(['GFKDLLKGAAKALVKTVLF'])).reshape(1,
-                                                                                                           max_length)
-        self.negative_callback_sample = sequence.pad(sequence.to_one_hot(['FPSELANMKNALGFFHIGEIF'])).reshape(1,
-                                                                                                             max_length)
-        self.positive_mic = self.mic_classifier.predict(self.positive_callback_sample.reshape(1, 25))
-        self.negative_mic = self.mic_classifier.predict(self.negative_callback_sample.reshape(1, 25))
 
     def on_epoch_end(self, epoch, logs={}):
-        # TODO
-        alphabet = list('ACDEFGHIKLMNPQRSTVWY')
-        new_kl = np.min([backend.get_value(self.kl_weight) * np.exp(self.kl_annealrate * epoch), self.max_kl])
-        backend.set_value(self.kl_weight, new_kl)
+        new_kl = np.min([K.get_value(self.kl_weight) * np.exp(self.kl_annealrate * epoch), self.max_kl])
+        K.set_value(self.kl_weight, new_kl)
 
-        pos_encoded_sample = self.encoder.predict(self.positive_callback_sample)
-        neg_encoded_sample = self.encoder.predict(self.negative_callback_sample)
-        pos_prediction = self.decoder.predict(pos_encoded_sample)
-        neg_prediction = self.decoder.predict(neg_encoded_sample)
-        pos_peptide = ''.join([alphabet[el - 1] if el != 0 else "'" for el in pos_prediction[0].argmax(axis=1)])
-        neg_peptide = ''.join([alphabet[el - 1] if el != 0 else "'" for el in neg_prediction[0].argmax(axis=1)])
-        pos_probs = self.output_layer(np.array([pos_prediction[0].argmax(axis=1)]))
-        neg_probs = self.output_layer(np.array([neg_prediction[0].argmax(axis=1)]))
-        pos_class_prob, pos_mic_pred = pos_probs[:, 0], pos_probs[:, 1]
-        neg_class_prob, neg_mic_pred = neg_probs[:, 0], neg_probs[:, 1]
+        new_tau = np.max([K.get_value(self.tau) * np.exp(- self.tau_annealrate * epoch), self.min_tau])
+        K.set_value(self.tau, new_tau)
 
-        new_tau = np.max([backend.get_value(self.tau) * np.exp(- self.tau_annealrate * epoch), self.min_tau])
-        backend.set_value(self.tau, new_tau)
-
-        print(
-            f'Original positive: GGAGHVPEYFVGIGTPISFYG, \n'
-            f'generated: {pos_peptide}, \n'
-            f'AMP probability: {pos_class_prob[0][0]}, \n',
-            f'MIC prediction: {pos_mic_pred[0][0]}. \n'
-        )
-        print(
-            f'Original negative: FPSELANMKNALGFFHIGEIF, \n'
-            f'generated: {neg_peptide}, \n'
-            f'AMP probability: {neg_class_prob[0][0]}, \n'
-            f'MIC prediction: {neg_mic_pred[0][0]}. \n'
-        )
-
-        print("Current KL weight is " + str(backend.get_value(self.kl_weight)))
-        print("Current temperature is " + str(backend.get_value(self.tau)))
+        print("Current KL weight is " + str(K.get_value(self.kl_weight)))
+        print("Current temperature is " + str(K.get_value(self.tau)))
 
 
 class SaveModelCallback(Callback):

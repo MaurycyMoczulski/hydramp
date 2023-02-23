@@ -13,6 +13,7 @@ from amp.utils import metrics
 from keras import backend as K
 from keras import layers, models, optimizers, losses
 import keras
+import tensorflow_probability as tfp
 
 
 class OutputLayer(keras.layers.Layer):
@@ -22,27 +23,20 @@ class OutputLayer(keras.layers.Layer):
         self.latent_dim = latent_dim
 
     def build(self, input_shape):
-        self.amp_kernel = self.add_weight(name='amp_kernel',
-                                    shape=(1, self.kernel_size),
-                                    initializer='uniform',
-                                    trainable=True)
-        self.mic_kernel = self.add_weight(name='mic_kernel',
-                                    shape=(1, self.kernel_size),
-                                    initializer='uniform',
-                                    trainable=True)
+        self.max_layer = layers.GlobalMaxPooling1D(data_format='channels_first')
+        self.conv1 = layers.Conv1D(1, self.kernel_size, strides=int(self.kernel_size / 4), activation='sigmoid')
+        self.conv2 = layers.Conv1D(1, self.kernel_size, strides=int(self.kernel_size / 4), activation='sigmoid')
+        self.conv1.trainable = False
+        self.conv2.trainable = False
         super(OutputLayer, self).build(input_shape)
 
     def call(self, z):
-        max_layer = layers.GlobalMaxPooling1D(data_format='channels_first')
-        slice_layers = [layers.Lambda(lambda x: x[:, i:i + self.kernel_size], name='slice_layer')
-                        for i in range(z.shape[-1] - self.kernel_size)]
-        reshape = layers.Reshape((1, self.latent_dim - self.kernel_size))
-        slices = [layer(z) for layer in slice_layers]
-        amp_output = max_layer(reshape(tf.concat([layers.Dot(axes=-1, normalize=True)([a, self.amp_kernel])
-                                                  for a in slices], axis=-1)))
-        mic_output = max_layer(reshape(tf.concat([layers.Dot(axes=-1, normalize=False)([a, self.mic_kernel])
-                                                  for a in slices], axis=-1)))
+        amp_output = self.max_layer(self.conv1(K.expand_dims(z, axis=-1)))
+        mic_output = self.max_layer(self.conv2(K.expand_dims(z, axis=-1)))
         return tf.concat([amp_output, mic_output], axis=-1)
+
+    def predict(self, z):
+        return self(K.constant(z))
 
 
 class MasterAMPTrainer(amp_model.Model):
@@ -69,6 +63,10 @@ class MasterAMPTrainer(amp_model.Model):
         self.latent_dim = self.encoder.latent_dim
         self.kernel_size = int(self.latent_dim / 2)
         self.output_layer = OutputLayer(kernel_size=self.kernel_size, latent_dim=self.latent_dim)
+        self.mvn = tfp.distributions.MultivariateNormalDiag(
+            loc=[-1, -.8, -.6, -.4, -.2, 0, .2, .4, .6, .8, 1],
+            scale_diag=[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        )
 
     @staticmethod
     def sampling(input_: Optional[Any] = None):
@@ -88,6 +86,7 @@ class MasterAMPTrainer(amp_model.Model):
         # noise_in is a noise applied to sampled z, must be defined as input to model
         noise_in = layers.Input(shape=(64,), name="noise_in")
 
+        mvn = tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=z_sigma)
         z = layers.Lambda(self.sampling, output_shape=(64,), name="z")
         z = z([noise_in, z_mean, z_sigma])
         reconstructed = self.decoder.output_tensor(z)
@@ -141,9 +140,9 @@ class MasterAMPTrainer(amp_model.Model):
         )
 
         y = vae_loss.VAELoss(
-            kl_weight=self.kl_weight,
             rcl_weight=self.rcl_weight,
         )([sequences_input, reconstructed, z_mean, z_sigma])
+        y = layers.Subtract()([y, layers.Lambda(lambda x: mvn.log_prob(x) + self.mvn.entropy())(z)])
 
         vae = models.Model(
             inputs=[
@@ -165,7 +164,7 @@ class MasterAMPTrainer(amp_model.Model):
             ]
         )
 
-        kl_metric = metrics.kl_loss(z_mean, z_sigma)
+        kl_metric = - mvn.log_prob(z) + self.mvn.entropy()
 
         def _kl_metric(y_true, y_pred):
             return kl_metric
@@ -198,7 +197,7 @@ class MasterAMPTrainer(amp_model.Model):
             optimizer='adam',
             loss=[
                 entropy_smoothed_loss,  # amp - classifier output
-                losses.Huber(),  # mic - classifier output
+                'mae',  # mic - classifier output
                 'mae',  # reconstruction
                 losses.Huber(),  # mic_mean_grad_input
                 losses.Huber(),  # amp_mean_grad_input
@@ -208,7 +207,7 @@ class MasterAMPTrainer(amp_model.Model):
             loss_weights=self.loss_weights,
             metrics=[
                 ['acc', 'binary_crossentropy'],  # amp - classifier output
-                ['mse', losses.Huber()],  # mic - classifier output
+                ['mae', 'binary_crossentropy'],  # mic - classifier output
                 [_kl_metric, _rcl, _reconstruction_acc, _amino_acc, _empty_acc],  # reconstruction
                 ['mse', losses.Huber()],  # mic_mean_grad_input
                 ['mse', losses.Huber()],  # amp_mean_grad_input
