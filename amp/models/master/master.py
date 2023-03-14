@@ -64,8 +64,8 @@ class MasterAMPTrainer(amp_model.Model):
         self.kernel_size = int(self.latent_dim / 2)
         self.output_layer = OutputLayer(kernel_size=self.kernel_size, latent_dim=self.latent_dim)
         self.mvn = tfp.distributions.MultivariateNormalDiag(
-            loc=[-1, -.8, -.6, -.4, -.2, 0, .2, .4, .6, .8, 1],
-            scale_diag=[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+            loc=K.random_normal((self.latent_dim,)),
+            scale_diag=K.random_normal((self.latent_dim,))
         )
 
     @staticmethod
@@ -142,7 +142,7 @@ class MasterAMPTrainer(amp_model.Model):
         y = vae_loss.VAELoss(
             rcl_weight=self.rcl_weight,
         )([sequences_input, reconstructed, z_mean, z_sigma])
-        y = layers.Subtract()([y, layers.Lambda(lambda x: mvn.log_prob(x) + self.mvn.entropy())(z)])
+        y = layers.Subtract()([y, layers.Lambda(lambda x: self.kl_weight * (mvn.log_prob(x) + self.mvn.entropy()))(z)])
 
         vae = models.Model(
             inputs=[
@@ -164,7 +164,7 @@ class MasterAMPTrainer(amp_model.Model):
             ]
         )
 
-        kl_metric = - mvn.log_prob(z) + self.mvn.entropy()
+        kl_metric = - (mvn.log_prob(z) + self.mvn.entropy()) * self.kl_weight
 
         def _kl_metric(y_true, y_pred):
             return kl_metric
