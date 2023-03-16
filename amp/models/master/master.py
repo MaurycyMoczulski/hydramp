@@ -1,4 +1,7 @@
+from collections import namedtuple
 from typing import Any, Dict, Optional, List
+
+import numpy as np
 import tensorflow as tf
 from amp.layers import vae_loss
 from amp.models import model as amp_model
@@ -15,6 +18,65 @@ from keras import layers, models, optimizers, losses
 import keras
 import tensorflow_probability as tfp
 
+VAEGMMLayerOutput = namedtuple(
+    'VAEGMMLayerOutput',
+    [
+        'sample',
+        'sample_log_prior',
+        'sample_log_posterior',
+        'sample_mixture_posterior',
+    ]
+)
+
+
+class VAEGMMLayer(layers.Layer):
+
+    def __init__(
+            self,
+            latent_size,
+            nb_components=10,
+            components_scale=0.3,
+            starting_components_scale=1.0,
+    ):
+        super(VAEGMMLayer, self).__init__()
+        self.latent_size = latent_size
+        self.nb_components = nb_components
+        self.components_scale = components_scale
+
+        self.components_logits = K.variable(
+            np.zeros((self.nb_components,)),
+            name='gmm_logits'
+        )
+        self.component_means = K.variable(
+            np.random.normal(size=(self.nb_components, self.latent_size)) * starting_components_scale
+        )
+        self.component_diags = K.constant(
+            np.ones(shape=(self.nb_components, self.latent_size)) * self.components_scale
+        )
+        self.mixture = tfp.distributions.MixtureSameFamily(
+            mixture_distribution=tfp.distributions.Categorical(
+                logits=self.components_logits),
+            components_distribution=tfp.distributions.MultivariateNormalDiag(
+                loc=self.component_means,
+                scale_diag=self.component_diags,
+            )
+        )
+
+    def call(self, x):
+        posterior_loc, posterior_scale_diag = x[0], x[1]
+        posterior_normal = tfp.distributions.MultivariateNormalDiag(
+            loc=posterior_loc,
+            scale_diag=posterior_scale_diag,
+        )
+        sample = posterior_normal.sample()
+
+        prior_likelihood = self.mixture.log_prob(sample)
+        posterior_likelihood = posterior_normal.log_prob(sample)
+
+        sample_log_prior = prior_likelihood
+        sample_log_posterior = posterior_likelihood
+        return sample_log_prior + sample_log_posterior
+
 
 class OutputLayer(keras.layers.Layer):
     def __init__(self, kernel_size, latent_dim):
@@ -23,7 +85,7 @@ class OutputLayer(keras.layers.Layer):
         self.latent_dim = latent_dim
 
     def build(self, input_shape):
-        self.max_layer = layers.GlobalMaxPooling1D(data_format='channels_first')
+        self.max_layer = layers.GlobalMaxPooling1D(data_format='channels_last')
         self.conv1 = layers.Conv1D(1, self.kernel_size, strides=int(self.kernel_size / 4), activation='sigmoid')
         self.conv2 = layers.Conv1D(1, self.kernel_size, strides=int(self.kernel_size / 4), activation='sigmoid')
         self.conv1.trainable = False
@@ -31,9 +93,9 @@ class OutputLayer(keras.layers.Layer):
         super(OutputLayer, self).build(input_shape)
 
     def call(self, z):
-        amp_output = self.max_layer(self.conv1(K.expand_dims(z, axis=-1)))
-        mic_output = self.max_layer(self.conv2(K.expand_dims(z, axis=-1)))
-        return tf.concat([amp_output, mic_output], axis=-1)
+        amp_output = self.max_layer(self.conv1(K.expand_dims(z, axis=-1)))[:, 0]
+        mic_output = self.max_layer(self.conv2(K.expand_dims(z, axis=-1)))[:, 0]
+        return tf.stack([amp_output, mic_output], axis=0)
 
     def predict(self, z):
         return self(K.constant(z))
@@ -63,10 +125,7 @@ class MasterAMPTrainer(amp_model.Model):
         self.latent_dim = self.encoder.latent_dim
         self.kernel_size = int(self.latent_dim / 2)
         self.output_layer = OutputLayer(kernel_size=self.kernel_size, latent_dim=self.latent_dim)
-        self.mvn = tfp.distributions.MultivariateNormalDiag(
-            loc=K.random_normal((self.latent_dim,)),
-            scale_diag=K.random_normal((self.latent_dim,))
-        )
+        self.mvn = VAEGMMLayer(self.latent_dim)
 
     @staticmethod
     def sampling(input_: Optional[Any] = None):
@@ -86,7 +145,6 @@ class MasterAMPTrainer(amp_model.Model):
         # noise_in is a noise applied to sampled z, must be defined as input to model
         noise_in = layers.Input(shape=(64,), name="noise_in")
 
-        mvn = tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=z_sigma)
         z = layers.Lambda(self.sampling, output_shape=(64,), name="z")
         z = z([noise_in, z_mean, z_sigma])
         reconstructed = self.decoder.output_tensor(z)
@@ -103,8 +161,8 @@ class MasterAMPTrainer(amp_model.Model):
 
         out = self.output_layer(z)
         reshape = layers.Reshape((1,))
-        amp_output = layers.Lambda(lambda x: reshape(x[:, 0]))(out)
-        mic_output = layers.Lambda(lambda x: reshape(x[:, 1]))(out)
+        amp_output = layers.Lambda(lambda x: reshape(x[0]))(out)
+        mic_output = layers.Lambda(lambda x: reshape(x[1]))(out)
         # CLASSIFIERS NAME wrappers
         # in order to appropriately name each output an identity layer lambda wrapper is added
 
@@ -139,10 +197,13 @@ class MasterAMPTrainer(amp_model.Model):
             name="amp_mean_grad"
         )
 
+        vaegmm = self.mvn(tf.stack([z_mean, z_sigma], axis=0))
         y = vae_loss.VAELoss(
             rcl_weight=self.rcl_weight,
         )([sequences_input, reconstructed, z_mean, z_sigma])
-        y = layers.Subtract()([y, layers.Lambda(lambda x: self.kl_weight * (mvn.log_prob(x) + self.mvn.entropy()))(z)])
+        y = layers.Subtract()([y, layers.Lambda(
+            lambda x: self.kl_weight * vaegmm)(z)]
+        )
 
         vae = models.Model(
             inputs=[
@@ -164,7 +225,7 @@ class MasterAMPTrainer(amp_model.Model):
             ]
         )
 
-        kl_metric = - (mvn.log_prob(z) + self.mvn.entropy()) * self.kl_weight
+        kl_metric = - vaegmm * self.kl_weight
 
         def _kl_metric(y_true, y_pred):
             return kl_metric
