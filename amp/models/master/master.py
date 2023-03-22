@@ -1,7 +1,4 @@
-from collections import namedtuple
 from typing import Any, Dict, Optional, List
-
-import numpy as np
 import tensorflow as tf
 from amp.layers import vae_loss
 from amp.models import model as amp_model
@@ -12,93 +9,10 @@ from amp.models.discriminators import discriminator as disc
 from amp.models.discriminators import veltri_amp_classifier
 from amp.models.encoders import amp_expanded_encoder
 from amp.models.encoders import encoder as enc
+from amp.models.new_layers.new_layers import OutputLayer, VAEGMMLayer
 from amp.utils import metrics
 from keras import backend as K
 from keras import layers, models, optimizers, losses
-import keras
-import tensorflow_probability as tfp
-
-VAEGMMLayerOutput = namedtuple(
-    'VAEGMMLayerOutput',
-    [
-        'sample',
-        'sample_log_prior',
-        'sample_log_posterior',
-        'sample_mixture_posterior',
-    ]
-)
-
-
-class VAEGMMLayer(layers.Layer):
-
-    def __init__(
-            self,
-            latent_size,
-            nb_components=10,
-            components_scale=0.3,
-            starting_components_scale=1.0,
-    ):
-        super(VAEGMMLayer, self).__init__()
-        self.latent_size = latent_size
-        self.nb_components = nb_components
-        self.components_scale = components_scale
-
-        self.components_logits = K.variable(
-            np.zeros((self.nb_components,)),
-            name='gmm_logits'
-        )
-        self.component_means = K.variable(
-            np.random.normal(size=(self.nb_components, self.latent_size)) * starting_components_scale
-        )
-        self.component_diags = K.constant(
-            np.ones(shape=(self.nb_components, self.latent_size)) * self.components_scale
-        )
-        self.mixture = tfp.distributions.MixtureSameFamily(
-            mixture_distribution=tfp.distributions.Categorical(
-                logits=self.components_logits),
-            components_distribution=tfp.distributions.MultivariateNormalDiag(
-                loc=self.component_means,
-                scale_diag=self.component_diags,
-            )
-        )
-
-    def call(self, x):
-        posterior_loc, posterior_scale_diag = x[0], x[1]
-        posterior_normal = tfp.distributions.MultivariateNormalDiag(
-            loc=posterior_loc,
-            scale_diag=posterior_scale_diag,
-        )
-        sample = posterior_normal.sample()
-
-        prior_likelihood = self.mixture.log_prob(sample)
-        posterior_likelihood = posterior_normal.log_prob(sample)
-
-        sample_log_prior = prior_likelihood
-        sample_log_posterior = posterior_likelihood
-        return sample_log_prior + sample_log_posterior
-
-
-class OutputLayer(keras.layers.Layer):
-    def __init__(self, kernel_size, latent_dim):
-        super(OutputLayer, self).__init__()
-        self.kernel_size = kernel_size
-        self.latent_dim = latent_dim
-
-    def build(self, input_shape):
-        self.max_layer = layers.GlobalMaxPooling1D(data_format='channels_last')
-        self.conv1 = layers.Conv1D(1, self.kernel_size, strides=int(self.kernel_size / 4), activation='sigmoid')
-        self.conv2 = layers.Conv1D(1, self.kernel_size, strides=int(self.kernel_size / 4), activation='sigmoid')
-        self.conv1.trainable = False
-        self.conv2.trainable = False
-        super(OutputLayer, self).build(input_shape)
-
-    def call(self, z):
-        amp_output = self.max_layer(self.conv1(K.expand_dims(z, axis=-1)))[:, 0]
-        mic_output = self.max_layer(self.conv2(K.expand_dims(z, axis=-1)))[:, 0]
-        return tf.stack([amp_output, mic_output], axis=0)
-
-    def predict(self, z):
-        return self(K.constant(z))
 
 
 class MasterAMPTrainer(amp_model.Model):
@@ -109,6 +23,8 @@ class MasterAMPTrainer(amp_model.Model):
             decoder: dec.Decoder,
             amp_classifier: disc.Discriminator,
             mic_classifier: disc.Discriminator,
+            output_layer,
+            mvn,
             kl_weight: float,
             rcl_weight: int,
             master_optimizer: optimizers.Optimizer,
@@ -124,8 +40,8 @@ class MasterAMPTrainer(amp_model.Model):
         self.loss_weights = loss_weights
         self.latent_dim = self.encoder.latent_dim
         self.kernel_size = int(self.latent_dim / 2)
-        self.output_layer = OutputLayer(kernel_size=self.kernel_size, latent_dim=self.latent_dim)
-        self.mvn = VAEGMMLayer(self.latent_dim)
+        self.mvn = mvn
+        self.output_layer = output_layer
 
     @staticmethod
     def sampling(input_: Optional[Any] = None):
@@ -286,6 +202,8 @@ class MasterAMPTrainer(amp_model.Model):
             'decoder_config_dict': self.decoder.get_config_dict(),
             'amp_config_dict': self.amp_classifier.get_config_dict(),
             'mic_config_dict': self.mic_classifier.get_config_dict(),
+            'output_layer_config_dict': self.output_layer.get_config_dict(),
+            'mvn_config_dict': self.mvn.get_config_dict(),
         }
 
     @classmethod
@@ -311,7 +229,14 @@ class MasterAMPTrainer(amp_model.Model):
                 config_dict=config_dict['mic_config_dict'],
                 layer_collection=layer_collection,
             ),
-
+            output_layer=OutputLayer.from_config_dict_and_layer_collection(
+                config_dict=config_dict['output_layer_config_dict'],
+                layer_collection=layer_collection,
+            ),
+            mvn=VAEGMMLayer.from_config_dict_and_layer_collection(
+                config_dict=config_dict['mvn_config_dict'],
+                layer_collection=layer_collection,
+            ),
             kl_weight=K.variable(0.1),
             rcl_weight=32,
             master_optimizer=optimizers.Adam(lr=1e-3),
@@ -327,6 +252,10 @@ class MasterAMPTrainer(amp_model.Model):
         for name, layer in self.amp_classifier.get_layers_with_names().items():
             layers_with_names[name] = layer
         for name, layer in self.mic_classifier.get_layers_with_names().items():
+            layers_with_names[name] = layer
+        for name, layer in self.output_layer.get_layers_with_names().items():
+            layers_with_names[name] = layer
+        for name, layer in self.mvn.get_layers_with_names().items():
             layers_with_names[name] = layer
 
         return layers_with_names

@@ -7,11 +7,13 @@ from amp.config import hydra
 from amp.models.decoders import amp_expanded_decoder
 from amp.models.encoders import amp_expanded_encoder
 from amp.models.master import master
+from amp.models.new_layers.new_layers import OutputLayer, VAEGMMLayer
 from amp.utils import basic_model_serializer, callback, generator
 from keras import backend, layers
 from keras.optimizers import Adam
 from sklearn.model_selection import train_test_split
 from amp.config import MIN_LENGTH, MAX_LENGTH, LATENT_DIM, MIN_KL, RCL_WEIGHT, HIDDEN_DIM, MAX_TEMPERATURE
+from amp.utils.basic_model_serializer import BasicModelSerializer
 
 
 config = tf.compat.v1.ConfigProto(
@@ -76,11 +78,29 @@ decoder = amp_expanded_decoder.AMPDecoderFactory.build_default(LATENT_DIM, tau, 
 input_to_decoder = layers.Input(shape=(LATENT_DIM,))
 decoder_model = decoder(input_to_decoder)
 
+max_layer = layers.GlobalMaxPooling1D(data_format='channels_last')
+conv1 = layers.Conv1D(1, LATENT_DIM // 4, strides=int(LATENT_DIM / 4), activation='sigmoid')
+conv2 = layers.Conv1D(1, LATENT_DIM // 4, strides=int(LATENT_DIM / 4), activation='sigmoid')
+conv1.trainable = False
+conv2.trainable = False
+output_layer = OutputLayer(max_layer=max_layer, conv1=conv1, conv2=conv2)
+nb_components = 10
+components_scale = 0.3
+starting_components_scale = 1.0
+
+mvn = VAEGMMLayer(
+    components_logits_np=np.zeros((nb_components,)).tolist(),
+    component_means_np=(np.random.normal(size=(nb_components, LATENT_DIM)) * starting_components_scale).tolist(),
+    component_diags_np=(np.ones(shape=(nb_components, LATENT_DIM)) * components_scale).tolist()
+)
+
 master_model = master.MasterAMPTrainer(
     amp_classifier=amp_classifier,
     mic_classifier=mic_classifier,
     encoder=encoder,
     decoder=decoder,
+    output_layer=output_layer,
+    mvn=mvn,
     kl_weight=kl_weight,
     rcl_weight=RCL_WEIGHT,
     master_optimizer=Adam(lr=1e-3),
@@ -88,8 +108,13 @@ master_model = master.MasterAMPTrainer(
 )
 
 master_keras_model = master_model.build(input_shape=(MAX_LENGTH, 21))
-
 master_keras_model.summary()
+
+amp_x_train = amp_x_train[:1000]
+amp_x_val = amp_x_val[:1000]
+mic_x_train = mic_x_train[:1000]
+mic_x_val = mic_x_val[:1000]
+
 
 amp_amp_train = amp_classifier_model.predict(amp_x_train, verbose=1, batch_size=10000).reshape(len(amp_x_train))
 amp_mic_train = mic_classifier_model.predict(amp_x_train, verbose=1, batch_size=10000).reshape(len(amp_x_train))
@@ -101,8 +126,8 @@ mic_mic_train = mic_classifier_model.predict(mic_x_train, verbose=1, batch_size=
 mic_amp_val = amp_classifier_model.predict(mic_x_val, verbose=1, batch_size=10000).reshape(len(mic_x_val))
 mic_mic_val = mic_classifier_model.predict(mic_x_val, verbose=1, batch_size=10000).reshape(len(mic_x_val))
 
-uniprot_x_train = np.array(du_sequence.pad(du_sequence.to_one_hot(pd.read_csv('data/Uniprot_0_25_train.csv').Sequence)))
-uniprot_x_val = np.array(du_sequence.pad(du_sequence.to_one_hot(pd.read_csv('data/Uniprot_0_25_val.csv').Sequence)))
+uniprot_x_train = np.array(du_sequence.pad(du_sequence.to_one_hot(pd.read_csv('data/Uniprot_0_25_train.csv').Sequence)))[:1000]
+uniprot_x_val = np.array(du_sequence.pad(du_sequence.to_one_hot(pd.read_csv('data/Uniprot_0_25_val.csv').Sequence)))[:1000]
 
 uniprot_amp_train = amp_classifier_model.predict(uniprot_x_train, verbose=1, batch_size=10000).reshape(len(uniprot_x_train))
 uniprot_mic_train = mic_classifier_model.predict(uniprot_x_train, verbose=1, batch_size=10000).reshape(len(uniprot_x_train))
@@ -145,7 +170,6 @@ vae_callback = callback.VAECallback(
     output_layer=master_model.output_layer
 )
 
-
 sm_callback = callback.SaveModelCallback(
     model=master_model,
     model_save_path="models/final_models/",
@@ -154,9 +178,12 @@ sm_callback = callback.SaveModelCallback(
 
 history = master_keras_model.fit_generator(
     training_generator,
-    steps_per_epoch=10,
-    epochs=2,
+    steps_per_epoch=1,
+    epochs=1,
     validation_data=validation_generator,
-    validation_steps=5,
+    validation_steps=1,
     callbacks=[vae_callback, sm_callback],
 )
+
+serializer = BasicModelSerializer()
+serializer.load_model("models/final_models/HydrAMP/0")
