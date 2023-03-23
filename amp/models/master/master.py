@@ -93,26 +93,6 @@ class MasterAMPTrainer(amp_model.Model):
         # GRADS ----------------------------------------------------------------------------------------------
         # Every value of target Sobolev grad must be provided as input to the graph because of Keras mechanics
 
-        mic_mean_grad = K.gradients(
-            loss=mic_output,
-            variables=[z_mean]
-        )[0]
-
-        amp_mean_grad = K.gradients(
-            loss=amp_output,
-            variables=[z_mean]
-        )[0]
-
-        mic_mean_grad_input = layers.Input(
-            tensor=tf.math.scalar_mul(self.decoder.activation.temperature, mic_mean_grad),
-            name="mic_mean_grad"
-        )
-
-        amp_mean_grad_input = layers.Input(
-            tensor=tf.math.scalar_mul(self.decoder.activation.temperature, amp_mean_grad),
-            name="amp_mean_grad"
-        )
-
         vaegmm = self.mvn(tf.stack([z_mean, z_sigma], axis=0))
         y = vae_loss.VAELoss(
             rcl_weight=self.rcl_weight,
@@ -126,16 +106,12 @@ class MasterAMPTrainer(amp_model.Model):
                 sequences_input,
                 amp_in,
                 mic_in,
-                noise_in,
-                mic_mean_grad_input,
-                amp_mean_grad_input,
+                noise_in
             ],
             outputs=[
                 amp_output_wrap,
                 mic_output_wrap,
                 y,
-                mic_mean_grad_input,
-                amp_mean_grad_input,
                 z_reconstructed_error,
                 unconstrained_reconstructed_error,
             ]
@@ -176,8 +152,6 @@ class MasterAMPTrainer(amp_model.Model):
                 entropy_smoothed_loss,  # amp - classifier output
                 'mae',  # mic - classifier output
                 'mae',  # reconstruction
-                losses.Huber(),  # mic_mean_grad_input
-                losses.Huber(),  # amp_mean_grad_input
                 'mse',  # z reconstructed error
                 'mse',  # unconstrained reconstructed error
             ],
@@ -186,8 +160,6 @@ class MasterAMPTrainer(amp_model.Model):
                 ['acc', 'binary_crossentropy'],  # amp - classifier output
                 ['mae', 'binary_crossentropy'],  # mic - classifier output
                 [_kl_metric, _rcl, _reconstruction_acc, _amino_acc, _empty_acc],  # reconstruction
-                ['mse', losses.Huber()],  # mic_mean_grad_input
-                ['mse', losses.Huber()],  # amp_mean_grad_input
                 ['mse', 'mae'],  # z reconstructed error
                 ['mse', 'mae'],  # unconstrained reconstructed error
 

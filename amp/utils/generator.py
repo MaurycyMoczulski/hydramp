@@ -54,8 +54,6 @@ def concatenated_generator(
                   result_amp, # classifier output
                   result_mic, # regressor output
                   np.zeros_like(result_amp), # reconstruction
-                  np.zeros_like(noise_in),  # regressor_mean_grad_input
-                  np.zeros_like(noise_in),  # classifier_mean_grad_input
                   np.zeros_like(noise_in), # reconstructed error
                   np.zeros_like(noise_in), # unconstrained reconstructed error
               ]
