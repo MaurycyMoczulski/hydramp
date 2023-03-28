@@ -67,7 +67,7 @@ class VAEGMMLayer(layers.Layer):
             component_diags_np=config_dict['component_diags_np']
         )
 
-    # TODO tutaj zamiast z_mean, z_sigma, moze dać z po losowaniu z noisa inaczej nie bedzie gradientu ?
+    # TODO tutaj zamiast z_mean, z_sigma, moze dać z po losowaniu z noisa ?
     def call(self, x):
         posterior_loc, posterior_scale_diag = x[0], x[1]
         posterior_normal = tfp.distributions.MultivariateNormalDiag(
@@ -100,7 +100,6 @@ class OutputLayer(keras.layers.Layer):
         self.conv2 = conv2
         self.name = name
 
-    # TODO change z using loc from mvn
     def call(self, z):
         amp_output = keras.activations.sigmoid(self.max_layer(self.conv1(K.expand_dims(z, axis=-1)))[:, 0])
         mic_output = keras.activations.sigmoid(self.max_layer(self.conv2(K.expand_dims(z, axis=-1)))[:, 0])

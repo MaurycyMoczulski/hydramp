@@ -12,7 +12,7 @@ from amp.models.encoders import encoder as enc
 from amp.models.new_layers.new_layers import OutputLayer, VAEGMMLayer
 from amp.utils import metrics
 from keras import backend as K
-from keras import layers, models, optimizers, losses
+from keras import layers, models, optimizers
 
 
 class MasterAMPTrainer(amp_model.Model):

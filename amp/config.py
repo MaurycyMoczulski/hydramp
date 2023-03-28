@@ -17,8 +17,6 @@ hydra = [
     0.1,  # classifier output
     0.1,  # regressor output
     1.0,  # reconstruction
-    0.10,  # regressor_mean_grad_input
-    0.10,  # classifier_mean_grad_input
     0.10,  # z cond reconstructed error
     0.05,  # unconstrained sleep cond reconstructed error
 ]
