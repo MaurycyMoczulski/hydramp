@@ -1,5 +1,4 @@
 import matplotlib.pyplot as plt
-import numpy as np
 import tensorflow as tf
 from amp.utils.basic_model_serializer import BasicModelSerializer
 import tensorflow_probability as tfp
@@ -15,14 +14,12 @@ model = serializer.load_model("models/final_models/HydrAMP/0")
 
 def sample_from_model(model):
     # model.mvn.mixture.sample()
-    kernel = np.zeros_like(model.mvn.mixture.components_distribution.loc[0])
-    kernel[:len(model.output_layer.conv1.loaded_weights[0])] = model.output_layer.conv1.loaded_weights[0].flatten()
     # print(model.mvn.mixture.components_distribution.scale.diag.shape)
-    # print(model.mvn.mixture.components_distribution.loc.shape)
+    # print(model.mvn.mixture.components_distribution.loc)
     # print(model.mvn.mixture.mixture_distribution.logits)
 
     distribution_nr = model.mvn.mixture.mixture_distribution.sample().numpy()
-    loc = kernel - model.mvn.mixture.components_distribution.loc[distribution_nr]
+    loc = model.mvn.mixture.components_distribution.loc[distribution_nr]
 
     mvn = tfp.distributions.MultivariateNormalDiag(
         loc=loc,
@@ -55,13 +52,31 @@ samples = K.eval(tf.concat(samples, axis=0))
 pca = PCA(n_components=8)
 pca_samples = pca.fit_transform(samples)
 
+loc_pca = pca.transform(model.mvn.mixture.components_distribution.loc.numpy())
+
+i = 0
+kernels = []
+while i + len(model.output_layer.conv1.loaded_weights[0]) <=\
+        len(model.mvn.mixture.components_distribution.loc[0]):
+    kernel = np.zeros_like(model.mvn.mixture.components_distribution.loc[0])
+    kernel[i:i + len(model.output_layer.conv1.loaded_weights[0])] =\
+        model.output_layer.conv1.loaded_weights[0].flatten()
+    kernels.append(kernel)
+    i += model.output_layer.conv1.strides[0]
+
+kernels = np.stack(kernels)
+print(kernels.shape)
+kernels_pca = pca.transform(kernels)
+
 plt.bar(range(len(pca.explained_variance_ratio_)), pca.explained_variance_ratio_)
 plt.show()
 
-print(pca_samples.shape)
-
-plt.scatter(pca_samples[:, 0][amp_y == 0], pca_samples[:, 0][amp_y == 0])
-plt.scatter(pca_samples[:, 0][amp_y == 1], pca_samples[:, 0][amp_y == 1], alpha=.01)
+plt.scatter(pca_samples[:, 0][amp_y == 0], pca_samples[:, 1][amp_y == 0], alpha=0.3)
+plt.scatter(pca_samples[:, 0][amp_y == 1], pca_samples[:, 1][amp_y == 1], alpha=.05)
+plt.scatter(loc_pca[:, 0], loc_pca[:, 1])
+plt.scatter(kernels_pca[:, 0], kernels_pca[:, 1])
 plt.show()
 
-
+print(samples.mean(axis=0), samples.std(axis=0))
+print(kernels.mean(axis=0), kernels.std(axis=0))
+print()

@@ -67,7 +67,6 @@ class VAEGMMLayer(layers.Layer):
             component_diags_np=config_dict['component_diags_np']
         )
 
-    # TODO tutaj zamiast z_mean, z_sigma, moze dać z po losowaniu z noisa ?
     def call(self, x):
         posterior_loc, posterior_scale_diag = x[0], x[1]
         posterior_normal = tfp.distributions.MultivariateNormalDiag(

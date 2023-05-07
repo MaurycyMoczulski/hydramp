@@ -177,7 +177,7 @@ sm_callback = callback.SaveModelCallback(
 history = master_keras_model.fit_generator(
     training_generator,
     steps_per_epoch=1408,
-    epochs=60,
+    epochs=11,
     validation_data=validation_generator,
     validation_steps=176,
     callbacks=[vae_callback, sm_callback],
