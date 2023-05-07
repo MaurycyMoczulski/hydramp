@@ -9,7 +9,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 
 serializer = BasicModelSerializer()
-model = serializer.load_model("models/final_models/HydrAMP/0")
+model = serializer.load_model("models/final_models/HydrAMP/9")
 
 
 def sample_from_model(model):
@@ -65,18 +65,14 @@ while i + len(model.output_layer.conv1.loaded_weights[0]) <=\
     i += model.output_layer.conv1.strides[0]
 
 kernels = np.stack(kernels)
-print(kernels.shape)
 kernels_pca = pca.transform(kernels)
 
 plt.bar(range(len(pca.explained_variance_ratio_)), pca.explained_variance_ratio_)
 plt.show()
 
-plt.scatter(pca_samples[:, 0][amp_y == 0], pca_samples[:, 1][amp_y == 0], alpha=0.3)
-plt.scatter(pca_samples[:, 0][amp_y == 1], pca_samples[:, 1][amp_y == 1], alpha=.05)
-plt.scatter(loc_pca[:, 0], loc_pca[:, 1])
-plt.scatter(kernels_pca[:, 0], kernels_pca[:, 1])
-plt.show()
-
-print(samples.mean(axis=0), samples.std(axis=0))
-print(kernels.mean(axis=0), kernels.std(axis=0))
-print()
+for i in range(3):
+    plt.scatter(pca_samples[:, i][amp_y == 0], pca_samples[:, i+1][amp_y == 0], alpha=0.3)
+    plt.scatter(pca_samples[:, i][amp_y == 1], pca_samples[:, i+1][amp_y == 1], alpha=.05)
+    plt.scatter(loc_pca[:, i], loc_pca[:, i+1])
+    plt.scatter(kernels_pca[:, i], kernels_pca[:, i+1])
+    plt.show()
