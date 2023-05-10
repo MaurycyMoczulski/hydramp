@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from amp.utils.basic_model_serializer import BasicModelSerializer
-import tensorflow_probability as tfp
 import amp.data_utils.data_loader as data_loader
 from amp.config import MIN_LENGTH, MAX_LENGTH
 import keras.backend as K
@@ -10,25 +9,6 @@ from sklearn.decomposition import PCA
 
 serializer = BasicModelSerializer()
 model = serializer.load_model("models/final_models/HydrAMP/9")
-
-
-def sample_from_model(model):
-    # model.mvn.mixture.sample()
-    # print(model.mvn.mixture.components_distribution.scale.diag.shape)
-    # print(model.mvn.mixture.components_distribution.loc)
-    # print(model.mvn.mixture.mixture_distribution.logits)
-
-    distribution_nr = model.mvn.mixture.mixture_distribution.sample().numpy()
-    loc = model.mvn.mixture.components_distribution.loc[distribution_nr]
-
-    mvn = tfp.distributions.MultivariateNormalDiag(
-        loc=loc,
-        scale_diag=np.full_like(kernel, fill_value=0.05),
-    )
-
-    sample = mvn.sample()
-    return np.argmax(K.eval(model.decoder.output_tensor(tf.expand_dims(sample, 0))), -1)
-
 
 data_manager = data_loader.AMPDataManager(
     'data/unlabelled_positive.csv',
@@ -67,12 +47,25 @@ while i + len(model.output_layer.conv1.loaded_weights[0]) <=\
 kernels = np.stack(kernels)
 kernels_pca = pca.transform(kernels)
 
-plt.bar(range(len(pca.explained_variance_ratio_)), pca.explained_variance_ratio_)
-plt.show()
+rows = 3
+fig, axs = plt.subplots(rows, 2)
+fig.set_figheight(4.5 * rows)
+img_no = 0
 
-for i in range(3):
-    plt.scatter(pca_samples[:, i][amp_y == 0], pca_samples[:, i+1][amp_y == 0], alpha=0.3)
-    plt.scatter(pca_samples[:, i][amp_y == 1], pca_samples[:, i+1][amp_y == 1], alpha=.05)
-    plt.scatter(loc_pca[:, i], loc_pca[:, i+1])
-    plt.scatter(kernels_pca[:, i], kernels_pca[:, i+1])
-    plt.show()
+axs[img_no // 2, img_no % 2].bar(range(len(pca.explained_variance_ratio_)), pca.explained_variance_ratio_)
+img_no += 1
+
+for i in range(4):
+    best_pca = np.argsort(np.abs(kernels_pca[i]))[-2:]
+    for k in range(len(best_pca) - 1):
+        axs[img_no // 2, img_no % 2].scatter(pca_samples[:, best_pca[k]][amp_y == 0], pca_samples[:, best_pca[k+1]][amp_y == 0], alpha=0.3)
+        axs[img_no // 2, img_no % 2].scatter(pca_samples[:, best_pca[k]][amp_y == 1], pca_samples[:, best_pca[k+1]][amp_y == 1], alpha=.05)
+        axs[img_no // 2, img_no % 2].scatter(loc_pca[:, best_pca[k]], loc_pca[:, best_pca[k+1]])
+        for j in range(len(kernels_pca)):
+            axs[img_no // 2, img_no % 2].scatter(kernels_pca[j, best_pca[k]], kernels_pca[j, best_pca[k+1]], label=str(j))
+            axs[img_no // 2, img_no % 2].arrow(0, 0, kernels_pca[j, best_pca[k]], kernels_pca[j, best_pca[k+1]], width=.0001)
+        axs[img_no // 2, img_no % 2].set_title(f'Direction no {i} PCA ({best_pca[k]} x {best_pca[k+1]})')
+        axs[img_no // 2, img_no % 2].legend()
+        img_no += 1
+
+fig.savefig('myplot.pdf')
