@@ -24,3 +24,8 @@ def perform_pca(hydramp, samples):
         hydramp.mvn.mixture.components_distribution.loc.numpy())
     pca_kernels = pca.transform(kernels)
     return pca, pca_samples, pca_loc, pca_kernels
+
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+

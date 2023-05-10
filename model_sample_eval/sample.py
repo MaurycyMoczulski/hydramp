@@ -1,6 +1,8 @@
 import keras
 import matplotlib.pyplot as plt
 import tensorflow as tf
+
+from amp.models.new_layers.new_layers import MaskLayer
 from amp.utils.basic_model_serializer import BasicModelSerializer
 import amp.data_utils.data_loader as data_loader
 from amp.config import MIN_LENGTH, MAX_LENGTH
@@ -9,7 +11,7 @@ import numpy as np
 from keras import layers
 
 # GET MODELS
-from model_sample_eval.functions import perform_pca
+from model_sample_eval.functions import perform_pca, sigmoid
 
 serializer = BasicModelSerializer()
 hydramp = serializer.load_model("models/final_models/HydrAMP/9")
@@ -35,14 +37,17 @@ negative_encoded_np = encoded_np[amp_y == 0][[5]]
 
 # PREPARE PCA
 pca, pca_samples, pca_loc, pca_kernels = perform_pca(hydramp, encoded_np)
-
+pca_original = pca.transform(negative_encoded_np)[0]
 
 # DEFINE SAMPLING MODEL
 encoded_input = layers.Input(shape=(64,))
 expanded = layers.Lambda(lambda x: K.expand_dims(x, axis=-1))(encoded_input)
 amp_conv_scores = hydramp.output_layer.conv1(expanded)
-amp_latent_pred = layers.GlobalMaxPooling1D(data_format='channels_last')(amp_conv_scores)
-latent_pred_model = keras.Model(encoded_input, [amp_latent_pred, amp_conv_scores])
+#mask = np.ones((4, 1))
+mask = [[0], [0], [0], [1]]
+amp_conv_scores_mask = MaskLayer(mask)(amp_conv_scores)
+amp_latent_pred = layers.GlobalMaxPooling1D(data_format='channels_last')(amp_conv_scores_mask)
+latent_pred_model = keras.Model(encoded_input, [amp_latent_pred, amp_conv_scores_mask])
 
 decoded = hydramp.decoder(encoded_input)
 
@@ -51,11 +56,12 @@ amp_classifier_pred = amp_classifier(decoded_input)
 
 # SAMPLE
 lr = 1e-1
-epochs = 50
+epochs = 500
 max_pred = .0
 encoded_tf = tf.convert_to_tensor(negative_encoded_np, dtype=tf.float32)
 
-rows = epochs // 25
+freq = 25
+rows = epochs // freq
 fig, axs = plt.subplots(rows, 1)
 fig.set_figheight(4 * rows)
 img_no = 0
@@ -75,21 +81,22 @@ for epoch in range(epochs):
     encoded_tf += np.random.normal(0, .01, size=(len(grads[0]),)) * lr
 
     max_pred = max(max_pred, amp_classifier_pred_val)
+
     print(
         f'Ep: %s  '
         f'Hydramp %.5f   '
         f'Classifier %.5f   '
         f'Max Classifier %.2f' % (
             epoch,
-            K.eval(amp_latent_pred_out[0])[0],
+            sigmoid(K.eval(amp_latent_pred_out[0])[0]),
             amp_classifier_pred_val,
             max_pred
         )
     )
 
-    if epoch % rows == epoch // rows - 1:
+    if epoch % freq == freq - 1:
         pca_generated = pca.transform(encoded_tf.numpy())[0]
-        direction_no = np.argmax(amp_latent_scores_val, axis=-1)[0]
+        direction_no = np.argmax(amp_latent_scores_val, axis=-2)[0]
         best_pca = np.argsort(np.abs(pca_kernels[direction_no]))[-2:]
         axs[img_no].scatter(
             pca_samples[:, best_pca[0]][amp_y == 0],
@@ -102,6 +109,9 @@ for epoch in range(epochs):
         axs[img_no].scatter(
             pca_kernels[direction_no, best_pca[0]],
             pca_kernels[direction_no, best_pca[1]], label='direction')
+        axs[img_no].scatter(
+            pca_original[best_pca[0]],
+            pca_original[best_pca[1]], label='original')
         axs[img_no].scatter(
             pca_generated[best_pca[0]],
             pca_generated[best_pca[1]], label='new')

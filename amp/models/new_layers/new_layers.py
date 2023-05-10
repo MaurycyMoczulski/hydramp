@@ -136,3 +136,25 @@ class OutputLayer(keras.layers.Layer):
             conv1=layer_collection[config_dict['name'] + '_conv1'],
             conv2=layer_collection[config_dict['name'] + '_conv2'],
         )
+
+
+class MaskLayer(keras.layers.Layer):
+    @property
+    def name(self):
+        return self._name
+
+    def __init__(self, k, name: str = 'MaskLayer'):
+        super(MaskLayer, self).__init__()
+        self.k = K.variable(k)
+        self.name = name
+
+    def call(self, z):
+        z = z + 2 * K.min(z)
+        return tf.math.multiply(self.k, z) - 2 * K.min(z)
+
+    def predict(self, z):
+        return self(K.constant(z))
+
+    @name.setter
+    def name(self, value):
+        self._name = value
