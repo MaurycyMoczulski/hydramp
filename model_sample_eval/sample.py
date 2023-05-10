@@ -78,7 +78,7 @@ for epoch in range(epochs):
     grads = K.gradients(amp_latent_pred_out, [encoded_tf])
     grads = K.eval(grads)
     encoded_tf += grads[0] * lr
-    encoded_tf += np.random.normal(0, .01, size=(len(grads[0]),)) * lr
+    encoded_tf += np.random.normal(0, .05, size=(len(grads[0]),)) * lr
 
     max_pred = max(max_pred, amp_classifier_pred_val)
 
