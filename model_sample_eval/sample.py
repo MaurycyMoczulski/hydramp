@@ -11,12 +11,14 @@ import numpy as np
 from keras import layers
 
 # GET MODELS
-from model_sample_eval.functions import perform_pca, sigmoid
+from model_sample_eval.functions import perform_pca, sigmoid, get_kernels
 
 serializer = BasicModelSerializer()
 hydramp = serializer.load_model("models/final_models/HydrAMP/direction")
 amp_classifier = serializer.load_model('models/amp_classifier')
 amp_classifier_model = amp_classifier()
+
+kernels = get_kernels(hydramp)
 
 
 # GET SAMPLES REPRESENTATIONS
@@ -53,7 +55,7 @@ amp_classifier_pred = amp_classifier(decoded_input)
 
 
 # SAMPLE
-epochs = 500
+epochs = 150
 max_pred = .0
 new_encoded_tf = tf.convert_to_tensor([negative_encoded_np], dtype=tf.float32)
 encoded_tf = tf.convert_to_tensor([negative_encoded_np], dtype=tf.float32)
@@ -66,7 +68,7 @@ img_no = 0
 
 path = []
 
-lr = 1e-1
+lr = 5e-2
 for epoch in range(epochs):
     amp_latent_pred_out, amp_conv_scores_out = latent_pred_model(new_encoded_tf)
 
@@ -79,9 +81,9 @@ for epoch in range(epochs):
     mse_loss = keras.losses.MeanSquaredError()(
         encoded_tf, new_encoded_tf)
 
-    grads = K.gradients(amp_latent_pred_out, [new_encoded_tf])
+    grads = K.gradients(amp_latent_pred_out - mse_loss, [new_encoded_tf])
     grads = K.eval(grads)[0][0]
-    noise = np.random.normal(1, 0.05, size=(len(grads),))
+    noise = np.random.normal(1, 0.1, size=(len(grads),))
     new_encoded_tf += np.multiply(grads, noise) * lr
 
     path.append(new_encoded_tf[0])
@@ -105,30 +107,36 @@ for epoch in range(epochs):
         path_stacked = np.stack(path)
         pca, pca_path, pca_loc, pca_kernels = perform_pca(hydramp, path_stacked)
         pca_original = pca.transform([negative_encoded_np])
+        best_pca = [0, 1]
+        '''
+        best_pca = np.argsort(
+            ((pca_original[0] - pca_kernels[3]) ** 2 -
+            (pca_path[-1] - pca_kernels[3]) ** 2) ** 2
+        )[-2:]
+        '''
         pca_samples = pca.transform(encoded_np)
-
         axs[img_no].scatter(
-            pca_samples[:, 0][amp_y == 0],
-            pca_samples[:, 1][amp_y == 0], alpha=.5, label='neg')
+            pca_samples[:, best_pca[0]][amp_y == 0],
+            pca_samples[:, best_pca[1]][amp_y == 0], alpha=.5, label='neg')
         axs[img_no].scatter(
-            pca_samples[:, 0][amp_y == 1],
-            pca_samples[:, 1][amp_y == 1], alpha=.1, label='pos')
+            pca_samples[:, best_pca[0]][amp_y == 1],
+            pca_samples[:, best_pca[1]][amp_y == 1], alpha=.1, label='pos')
         axs[img_no].scatter(
-            pca_loc[:, 0], pca_loc[:, 1], label='mu')
+            pca_loc[:, best_pca[0]], pca_loc[:, best_pca[1]], label='mu')
         axs[img_no].scatter(
-            pca_original[:, 0],
-            pca_original[:, 1], label='original')
+            pca_original[:, best_pca[0]],
+            pca_original[:, best_pca[1]], label='original')
         axs[img_no].plot(
-            pca_path[:, 0],
-            pca_path[:, 1], label='new')
+            pca_path[:, best_pca[0]],
+            pca_path[:, best_pca[1]], label='new')
         axs[img_no].scatter(
-            pca_kernels[:, 0],
-            pca_kernels[:, 1], label='directions', alpha=1)
+            pca_kernels[:, best_pca[0]],
+            pca_kernels[:, best_pca[1]], label='directions', alpha=1)
 
         for j in range(len(pca_kernels)):
             axs[img_no].arrow(
-                0, 0, pca_kernels[j, 0],
-                pca_kernels[j, 1], width=.0001)
+                0, 0, pca_kernels[j, best_pca[0]],
+                pca_kernels[j, best_pca[1]], width=.0001)
         axs[img_no].set_title(
             f'PATH')
         axs[img_no].legend()
