@@ -1,5 +1,6 @@
 from typing import Dict
 import keras
+import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from keras import backend as K
@@ -100,8 +101,10 @@ class OutputLayer(keras.layers.Layer):
         self.name = name
 
     def call(self, z):
-        amp_output = keras.activations.sigmoid(self.max_layer(self.conv1(K.expand_dims(z, axis=-1)))[:, 0])
-        mic_output = keras.activations.sigmoid(self.max_layer(self.conv2(K.expand_dims(z, axis=-1)))[:, 0])
+        amp_output = keras.activations.sigmoid(self.max_layer(
+            K.pow(self.conv1(K.expand_dims(z, axis=-1)), 2))[:, 0])
+        mic_output = keras.activations.sigmoid(self.max_layer(
+            K.pow(self.conv2(K.expand_dims(z, axis=-1)), 2))[:, 0])
         return tf.stack([amp_output, mic_output], axis=0)
 
     def predict(self, z):
@@ -143,14 +146,42 @@ class MaskLayer(keras.layers.Layer):
     def name(self):
         return self._name
 
-    def __init__(self, k, name: str = 'MaskLayer'):
+    def __init__(self, idx, k, name: str = 'MaskLayer'):
         super(MaskLayer, self).__init__()
-        self.k = K.variable(k)
+        mask = np.zeros(k)
+        mask[idx] = 1
+        self.mask = np.where(mask)[0]
         self.name = name
 
     def call(self, z):
-        z = z + 2 * K.min(z)
-        return tf.math.multiply(self.k, z) - 2 * K.min(z)
+        return tf.gather(z, self.mask, axis=1)
+
+    def predict(self, z):
+        return self(K.constant(z))
+
+    @name.setter
+    def name(self, value):
+        self._name = value
+
+
+class PCATransformLayer(keras.layers.Layer):
+    @property
+    def name(self):
+        return self._name
+
+    def __init__(self, mean, components_T, components_idx, n_components, name: str = 'PCATransformLayer'):
+        super(PCATransformLayer, self).__init__()
+        self.mean = K.variable(mean)
+        self.components_T = K.variable(components_T)
+        mask = np.ones(n_components)
+        mask[components_idx] = 0
+        self.mask = np.where(mask)[0]
+        self.name = name
+
+    def call(self, z):
+        z = z - self.mean
+        z_dot = K.dot(z, self.components_T)
+        return tf.gather(z_dot, self.mask, axis=1)
 
     def predict(self, z):
         return self(K.constant(z))

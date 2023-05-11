@@ -16,14 +16,14 @@ def get_kernels(hydramp):
     return np.stack(kernels)
 
 
-def perform_pca(hydramp, samples):
+def perform_pca(hydramp, X):
     kernels = get_kernels(hydramp)
     pca = PCA(n_components=8)
-    pca_samples = pca.fit_transform(samples)
+    X = pca.fit_transform(X)
     pca_loc = pca.transform(
         hydramp.mvn.mixture.components_distribution.loc.numpy())
     pca_kernels = pca.transform(kernels)
-    return pca, pca_samples, pca_loc, pca_kernels
+    return pca, X, pca_loc, pca_kernels
 
 
 def sigmoid(x):
