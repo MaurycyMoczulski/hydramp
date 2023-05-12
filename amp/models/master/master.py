@@ -9,7 +9,7 @@ from amp.models.discriminators import discriminator as disc
 from amp.models.discriminators import veltri_amp_classifier
 from amp.models.encoders import amp_expanded_encoder
 from amp.models.encoders import encoder as enc
-from amp.models.new_layers.new_layers import OutputLayer, VAEGMMLayer
+from amp.models.new_layers.new_layers_v3 import OutputLayer, VAEGMMLayer
 from amp.utils import metrics
 from keras import backend as K
 from keras import layers, models, optimizers

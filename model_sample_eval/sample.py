@@ -2,7 +2,7 @@ import keras
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
-from amp.models.new_layers.new_layers import MaskLayer, PCATransformLayer
+from amp.models.new_layers.new_layers_v1 import MaskLayer, PCATransformLayer
 from amp.utils.basic_model_serializer import BasicModelSerializer
 import amp.data_utils.data_loader as data_loader
 from amp.config import MIN_LENGTH, MAX_LENGTH
@@ -68,7 +68,7 @@ img_no = 0
 
 path = []
 
-lr = 5e-2
+lr = 5e-3
 for epoch in range(epochs):
     amp_latent_pred_out, amp_conv_scores_out = latent_pred_model(new_encoded_tf)
 
@@ -83,8 +83,8 @@ for epoch in range(epochs):
 
     grads = K.gradients(amp_latent_pred_out - mse_loss, [new_encoded_tf])
     grads = K.eval(grads)[0][0]
-    noise = np.random.normal(1, 0.1, size=(len(grads),))
-    new_encoded_tf += np.multiply(grads, noise) * lr
+    noise = np.random.normal(1, 0.2, size=(len(grads),))
+    new_encoded_tf += np.multiply(kernels[3] + 10 * grads, noise) * lr
 
     path.append(new_encoded_tf[0])
     max_pred = max(max_pred, amp_classifier_pred_val)

@@ -7,7 +7,7 @@ from amp.config import hydra
 from amp.models.decoders import amp_expanded_decoder
 from amp.models.encoders import amp_expanded_encoder
 from amp.models.master import master
-from amp.models.new_layers.new_layers import OutputLayer, VAEGMMLayer
+from amp.models.new_layers.new_layers_v1 import OutputLayer, VAEGMMLayer
 from amp.utils import basic_model_serializer, callback, generator
 from keras import backend, layers
 from keras.optimizers import Adam
