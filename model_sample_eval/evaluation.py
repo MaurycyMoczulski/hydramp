@@ -25,7 +25,7 @@ encoded = hydramp.encoder(negative_peptides_input)
 
 samples = encoded.predict(samples_np)
 
-pca, pca_samples, pca_loc, pca_kernels = perform_pca(hydramp, samples)
+pca, pca_samples, pca_loc, pca_kernels, kernels, loc = perform_pca(hydramp, samples)
 
 rows = 5
 fig, axs = plt.subplots(rows, 1)
@@ -36,6 +36,33 @@ axs[img_no].bar(range(len(pca.explained_variance_ratio_)), pca.explained_varianc
 img_no += 1
 
 for i in range(4):
+    '''    
+    t_matrix = np.zeros((64, 2))
+    t_matrix[:, 0] = (kernels[i] == 0).astype(float)
+    t_matrix[:, 1] = kernels[i]
+    sample_lens = np.reshape(np.linalg.norm(samples, axis=1), (samples.shape[0], 1))
+    amp_samples = samples / sample_lens
+    t_samples = np.matmul(amp_samples, t_matrix)
+    t_kernels = np.matmul(kernels, t_matrix)
+    t_loc = np.matmul(loc, t_matrix)
+    print(t_kernels)
+    axs[img_no].scatter(
+        t_samples[:, 0][amp_y == 0],
+        t_samples[:, 1][amp_y == 0], alpha=.5, label='neg')
+    axs[img_no].scatter(
+        t_samples[:, 0][amp_y == 1],
+        t_samples[:, 1][amp_y == 1], alpha=.05, label='pos')
+    axs[img_no].scatter(
+        t_loc[:, 0], t_loc[:, -1], label='loc')
+    axs[img_no].scatter(
+        0, t_kernels[i, 1], label=str(i))
+    axs[img_no].arrow(
+        0, 0, 0, t_kernels[i, 1], width=.0001)
+    axs[img_no].set_title(
+        f'Direction no {i}')
+    axs[img_no].legend()
+    img_no += 1
+    '''
     best_pca = np.argsort(np.abs(pca_kernels[i]))[-2:]
     for k in range(len(best_pca) - 1):
         axs[img_no].scatter(
@@ -54,7 +81,8 @@ for i in range(4):
                 0, 0, pca_kernels[j, best_pca[k]], pca_kernels[j, best_pca[k+1]], width=.0001)
         axs[img_no].set_title(
             f'Direction no {i} PCA ({best_pca[k]} x {best_pca[k+1]})')
-        axs[img_no].legend()
+        axs[img_no].legend(framealpha=0.3, markerscale=.7)
+        axs[img_no].set_aspect('equal', adjustable='box')
         img_no += 1
 
 fig.savefig('model_sample_eval/latent.pdf')

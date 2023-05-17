@@ -93,19 +93,19 @@ class OutputLayer(keras.layers.Layer):
     def name(self):
         return self._name
 
-    def __init__(self, max_layer, conv1, conv2, name: str = 'OutputLayer'):
+    def __init__(self, max_layer, conv1, conv2=None, name: str = 'OutputLayer'):
         super(OutputLayer, self).__init__()
         self.max_layer = max_layer
         self.conv1 = conv1
         self.name = name
 
     def call(self, z):
-        self.conv1.weight = self.conv1.weight / tf.norm(self.conv1.weight)
-        z_len = tf.norm(z)
-        z_amp = layers.Lambda(lambda x: z / z_len)
-        amp_output = keras.activations.sigmoid(self.max_layer(
-            K.pow(self.conv1(K.expand_dims(z_amp, axis=-1)), 2))[:, 0])
-        mic_output = z_len
+        z_len = tf.norm(z, axis=1)
+        z_amp = layers.Lambda(lambda x: x / K.expand_dims(tf.norm(x, axis=1), axis=-1))(z)
+        amp_output = layers.Lambda(lambda x: (x + 1) / 2)(
+            self.max_layer(self.conv1(K.expand_dims(z_amp, axis=-1)))[:, 0]
+        )
+        mic_output = K.log(z_len / 5)
         return tf.stack([amp_output, mic_output], axis=0)
 
     def predict(self, z):
@@ -125,7 +125,6 @@ class OutputLayer(keras.layers.Layer):
         return {
             f'{self.name}_max_layer': self.max_layer,
             f'{self.name}_conv1': self.conv1,
-            f'{self.name}_conv2': self.conv2,
         }
 
     @classmethod
@@ -138,7 +137,6 @@ class OutputLayer(keras.layers.Layer):
             name=config_dict['name'],
             max_layer=layer_collection[config_dict['name'] + '_max_layer'],
             conv1=layer_collection[config_dict['name'] + '_conv1'],
-            conv2=layer_collection[config_dict['name'] + '_conv2'],
         )
 
 

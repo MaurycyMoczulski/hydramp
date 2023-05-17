@@ -188,8 +188,8 @@ MIN_TEMPERATURE = 0.1
 MAX_TEMPERATURE = 2.0
 
 hydra = [
-    .1,  # classifier output
-    .1,  # regressor output
+    10,  # classifier output
+    1,  # regressor output
     1.0,  # reconstruction
     0.10,  # z cond reconstructed error
     0.05,  # unconstrained sleep cond reconstructed error

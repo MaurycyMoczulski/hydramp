@@ -7,14 +7,13 @@ from amp.config import hydra
 from amp.models.decoders import amp_expanded_decoder
 from amp.models.encoders import amp_expanded_encoder
 from amp.models.master import master
-from amp.models.new_layers.new_layers_v1 import OutputLayer, VAEGMMLayer
+from amp.models.new_layers.new_layers_v3 import OutputLayer, VAEGMMLayer
 from amp.utils import basic_model_serializer, callback, generator
 from keras import backend, layers
 from keras.optimizers import Adam
 from sklearn.model_selection import train_test_split
 from amp.config import MIN_LENGTH, MAX_LENGTH, LATENT_DIM, MIN_KL, RCL_WEIGHT, HIDDEN_DIM, MAX_TEMPERATURE
-from amp.utils.basic_model_serializer import BasicModelSerializer\
-
+from tensorflow.keras.constraints import unit_norm
 
 config = tf.compat.v1.ConfigProto(
     gpu_options=tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8),
@@ -79,8 +78,8 @@ input_to_decoder = layers.Input(shape=(LATENT_DIM,))
 decoder_model = decoder(input_to_decoder)
 
 max_layer = layers.GlobalMaxPooling1D(data_format='channels_last')
-conv1 = layers.Conv1D(1, LATENT_DIM // 4, strides=int(LATENT_DIM / 4))
-conv2 = layers.Conv1D(1, LATENT_DIM // 4, strides=int(LATENT_DIM / 4))
+conv1 = layers.Conv1D(1, LATENT_DIM // 4, strides=int(LATENT_DIM / 4), use_bias=False, kernel_constraint=unit_norm())
+conv2 = layers.Conv1D(1, LATENT_DIM // 4, strides=int(LATENT_DIM / 4), use_bias=False, kernel_constraint=unit_norm())
 output_layer = OutputLayer(max_layer=max_layer, conv1=conv1, conv2=conv2)
 nb_components = 10
 components_scale = 0.3
