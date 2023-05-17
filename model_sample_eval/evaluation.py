@@ -8,7 +8,7 @@ import numpy as np
 
 # GET MODEL
 serializer = BasicModelSerializer()
-hydramp = serializer.load_model("models/final_models/HydrAMP/9")
+hydramp = serializer.load_model("models/final_models/HydrAMP/final")
 
 
 # GET SAMPLES REPRESENTATIONS
@@ -27,7 +27,7 @@ samples = encoded.predict(samples_np)
 
 pca, pca_samples, pca_loc, pca_kernels, kernels, loc = perform_pca(hydramp, samples)
 
-rows = 5
+rows = 1 + 4 * len(kernels)
 fig, axs = plt.subplots(rows, 1)
 fig.set_figheight(4 * rows)
 img_no = 0
@@ -35,7 +35,7 @@ img_no = 0
 axs[img_no].bar(range(len(pca.explained_variance_ratio_)), pca.explained_variance_ratio_)
 img_no += 1
 
-for i in range(4):
+for i in range(len(kernels)):
     '''    
     t_matrix = np.zeros((64, 2))
     t_matrix[:, 0] = (kernels[i] == 0).astype(float)
@@ -63,7 +63,7 @@ for i in range(4):
     axs[img_no].legend()
     img_no += 1
     '''
-    best_pca = np.argsort(np.abs(pca_kernels[i]))[-2:]
+    best_pca = np.argsort(np.abs(pca_kernels[i]))[-5:][::-1]
     for k in range(len(best_pca) - 1):
         axs[img_no].scatter(
             pca_samples[:, best_pca[k]][amp_y == 0],
@@ -73,7 +73,7 @@ for i in range(4):
             pca_samples[:, best_pca[k+1]][amp_y == 1], alpha=.05, label='pos')
         axs[img_no].scatter(
             pca_loc[:, best_pca[k]], pca_loc[:, best_pca[k+1]], label='loc')
-        for j in range(len(pca_kernels)):
+        for j in range(len(kernels)):
             axs[img_no].scatter(
                 pca_kernels[j, best_pca[k]],
                 pca_kernels[j, best_pca[k+1]], label=str(j))

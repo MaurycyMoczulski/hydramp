@@ -18,11 +18,11 @@ hydramp = serializer.load_model("models/final_models/HydrAMP/9")
 amp_classifier = serializer.load_model('models/amp_classifier')
 amp_classifier_model = amp_classifier()
 
-kernels = get_kernels(hydramp)
-
+'''
 loc = hydramp.mvn.mixture.components_distribution.loc.numpy()
 loc_lens = np.reshape(np.linalg.norm(loc, axis=1), (loc.shape[0], 1))
 loc = loc / loc_lens
+'''
 
 # GET SAMPLES REPRESENTATIONS
 data_manager = data_loader.AMPDataManager(
@@ -45,19 +45,20 @@ encoded_np_norm = encoded_np / encoded_np_len
 negative_encoded_np_len = np.linalg.norm(negative_encoded_np)
 negative_encoded_np_norm = negative_encoded_np / negative_encoded_np_len
 
+pca, pca_samples, pca_loc, pca_kernels, kernels, loc = perform_pca(hydramp, encoded_np)
 
 # DEFINE SAMPLING MODEL
 encoded_input = layers.Input(shape=(64,))
 normed = layers.Lambda(
-    lambda x: x / K.expand_dims(tf.norm(x, axis=1), axis=-1))(encoded_input)
+    lambda x: x / K.expand_dims(tf.norm(x), axis=-1))(encoded_input)
 expanded_normed = layers.Lambda(lambda x: K.expand_dims(x, axis=-1))(normed)
 amp_conv_scores = hydramp.output_layer.conv1(expanded_normed)
-amp_conv_scores_mask = MaskLayer([0, 1, 2, 3], 4)(amp_conv_scores)
-amp_latent_vector_dot = layers.GlobalMaxPooling1D(
-    data_format='channels_last')(amp_conv_scores_mask)
-amp_latent_pred = layers.Lambda(lambda x: (x + 1) / 2)(amp_latent_vector_dot)
+#amp_conv_scores_mask = MaskLayer([0, 1, 2, 3], 4)(amp_conv_scores)
+#amp_latent_vector_dot = layers.GlobalMaxPooling1D(
+    #data_format='channels_last')(amp_conv_scores_mask)
+amp_latent_pred = layers.Lambda(lambda x: (x + 1) / 2)(amp_conv_scores)
 latent_pred_model = keras.Model(
-    encoded_input, [amp_latent_pred, amp_conv_scores_mask])
+    encoded_input, [amp_latent_pred, amp_conv_scores])
 
 decoded = hydramp.decoder(encoded_input)
 
@@ -66,7 +67,7 @@ amp_classifier_pred = amp_classifier(decoded_input)
 
 
 # SAMPLE
-epochs = 150
+epochs = 200
 max_pred = .0
 new_encoded_tf = tf.convert_to_tensor([negative_encoded_np], dtype=tf.float32)
 encoded_tf = tf.convert_to_tensor([negative_encoded_np], dtype=tf.float32)
@@ -79,7 +80,8 @@ img_no = 0
 
 path = []
 
-lr = 1
+lr = .3
+ver = 1
 for epoch in range(epochs):
     amp_latent_pred_out, amp_conv_scores_out = latent_pred_model(new_encoded_tf)
 
@@ -92,9 +94,9 @@ for epoch in range(epochs):
     mse_loss = keras.losses.MeanSquaredError()(
         encoded_tf, new_encoded_tf)
 
-    grads = K.gradients(amp_latent_pred_out, [new_encoded_tf])
+    grads = K.gradients(amp_latent_pred_out - mse_loss, [new_encoded_tf])
     grads = K.eval(grads)[0][0]
-    noise = np.random.normal(1, 0, size=(len(grads),))
+    noise = np.random.normal(1, .2, size=(len(grads),))
     new_encoded_tf += np.multiply(grads, noise) * lr
 
     new_encoded_tf_norm = new_encoded_tf / np.reshape(
@@ -110,7 +112,7 @@ for epoch in range(epochs):
         f'Cls %.5f   '
         f'MaxCLS %.2f' % (
             epoch,
-            sigmoid(K.eval(amp_latent_pred_out[0])[0]),
+            K.eval(amp_latent_pred_out[0])[0],
             K.eval(mse_loss),
             amp_classifier_pred_val,
             max_pred
@@ -119,14 +121,17 @@ for epoch in range(epochs):
 
     if epoch % freq == freq - 1:
         path_stacked = np.stack(path)
-        '''
-        path_stacked_len = np.reshape(
-            np.linalg.norm(path_stacked, axis=1), (path_stacked.shape[0], 1))
-        path_stacked_norm = path_stacked / path_stacked_len
-        pca, pca_path, pca_loc, pca_kernels, kernels, loc = perform_pca(hydramp, path_stacked)
+        if ver == 2:
+            path_stacked_len = np.reshape(
+                np.linalg.norm(path_stacked, axis=1), (path_stacked.shape[0], 1))
+            path_stacked_norm = path_stacked / path_stacked_len
+            pca, pca_path, pca_loc, pca_kernels, kernels, loc = perform_pca(hydramp, path_stacked)
+            pca_samples = pca.transform(encoded_np_norm)
+            best_pca = [0, 1]
+        elif ver == 1:
+            pca_path = pca.transform(path_stacked)
+            best_pca = np.argsort(np.abs(pca_kernels[0]))[-2:][::-1]
         pca_original = pca.transform([negative_encoded_np_norm])
-        best_pca = [0, 1]
-        pca_samples = pca.transform(encoded_np_norm)
         axs[img_no].scatter(
             pca_samples[:, best_pca[0]][amp_y == 0],
             pca_samples[:, best_pca[1]][amp_y == 0], alpha=.5, label='neg')
@@ -173,11 +178,10 @@ for epoch in range(epochs):
         axs[img_no].scatter(
             t_loc[:, 0], t_loc[:, -1], label='loc')
         axs[img_no].scatter(
-            0, t_kernels[2, 1], label=str(2))
+            0, t_kernels[0, 1], label='direction')
         axs[img_no].arrow(
-            0, 0, 0, t_kernels[2, 1], width=.0001)
-        axs[img_no].set_title(
-            f'Direction no {2}')
+            0, 0, 0, t_kernels[0, 1], width=.0001)
+        axs[img_no].set_title('Path')
         axs[img_no].scatter(
             t_original[:, 0],
             t_original[:, 1], label='original')
@@ -186,5 +190,5 @@ for epoch in range(epochs):
             t_path[:, 1], label='new')
         axs[img_no].legend()
         img_no += 1
-
-fig.savefig('model_sample_eval/sampling_process.pdf')
+        '''
+fig.savefig(f'model_sample_eval/sampling_process{ver}.pdf')
