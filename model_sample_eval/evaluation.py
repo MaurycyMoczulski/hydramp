@@ -8,7 +8,7 @@ import numpy as np
 
 # GET MODEL
 serializer = BasicModelSerializer()
-hydramp = serializer.load_model("models/final_models/HydrAMP/final")
+hydramp = serializer.load_model("models/final_models/HydrAMP/9")
 
 
 # GET SAMPLES REPRESENTATIONS
@@ -36,33 +36,6 @@ axs[img_no].bar(range(len(pca.explained_variance_ratio_)), pca.explained_varianc
 img_no += 1
 
 for i in range(len(kernels)):
-    '''    
-    t_matrix = np.zeros((64, 2))
-    t_matrix[:, 0] = (kernels[i] == 0).astype(float)
-    t_matrix[:, 1] = kernels[i]
-    sample_lens = np.reshape(np.linalg.norm(samples, axis=1), (samples.shape[0], 1))
-    amp_samples = samples / sample_lens
-    t_samples = np.matmul(amp_samples, t_matrix)
-    t_kernels = np.matmul(kernels, t_matrix)
-    t_loc = np.matmul(loc, t_matrix)
-    print(t_kernels)
-    axs[img_no].scatter(
-        t_samples[:, 0][amp_y == 0],
-        t_samples[:, 1][amp_y == 0], alpha=.5, label='neg')
-    axs[img_no].scatter(
-        t_samples[:, 0][amp_y == 1],
-        t_samples[:, 1][amp_y == 1], alpha=.05, label='pos')
-    axs[img_no].scatter(
-        t_loc[:, 0], t_loc[:, -1], label='loc')
-    axs[img_no].scatter(
-        0, t_kernels[i, 1], label=str(i))
-    axs[img_no].arrow(
-        0, 0, 0, t_kernels[i, 1], width=.0001)
-    axs[img_no].set_title(
-        f'Direction no {i}')
-    axs[img_no].legend()
-    img_no += 1
-    '''
     best_pca = np.argsort(np.abs(pca_kernels[i]))[-5:][::-1]
     for k in range(len(best_pca) - 1):
         axs[img_no].scatter(
@@ -85,4 +58,4 @@ for i in range(len(kernels)):
         axs[img_no].set_aspect('equal', adjustable='box')
         img_no += 1
 
-fig.savefig('model_sample_eval/latent.pdf')
+fig.savefig('model_sample_eval/latent2.pdf')

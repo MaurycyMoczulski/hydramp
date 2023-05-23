@@ -78,12 +78,10 @@ input_to_decoder = layers.Input(shape=(LATENT_DIM,))
 decoder_model = decoder(input_to_decoder)
 
 max_layer = layers.GlobalMaxPooling1D(data_format='channels_last')
-#conv1 = layers.Conv1D(1, LATENT_DIM // 4, strides=int(LATENT_DIM / 4), use_bias=False, kernel_constraint=unit_norm())
-#conv2 = layers.Conv1D(1, LATENT_DIM // 4, strides=int(LATENT_DIM / 4), use_bias=False, kernel_constraint=unit_norm())
-conv1 = layers.Conv1D(1, LATENT_DIM, strides=1, use_bias=False, kernel_constraint=unit_norm())
+conv1 = layers.Conv1D(1, LATENT_DIM, strides=1, use_bias=False, kernel_constraint=unit_norm())  # 1
 conv2 = None
 output_layer = OutputLayer(max_layer=max_layer, conv1=conv1, conv2=conv2)
-nb_components = 10
+nb_components = 1
 components_scale = 0.3
 starting_components_scale = 1.0
 

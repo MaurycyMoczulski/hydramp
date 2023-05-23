@@ -18,14 +18,14 @@ def get_kernels(hydramp):
 
 
 def perform_pca(hydramp, X):
-    X_lens = np.reshape(np.linalg.norm(X, axis=1), (X.shape[0], 1))
-    X = X / X_lens
+    # X_lens = np.reshape(np.linalg.norm(X, axis=1), (X.shape[0], 1))
+    # X = X / X_lens
     kernels = get_kernels(hydramp)
     pca = PCA(n_components=8)
     X = pca.fit_transform(X)
     loc = hydramp.mvn.mixture.components_distribution.loc.numpy()
     loc_lens = np.reshape(np.linalg.norm(loc, axis=1), (loc.shape[0], 1))
-    loc = loc / loc_lens
+    # loc = loc / loc_lens
     pca_loc = pca.transform(loc)
     pca_kernels = pca.transform(kernels)
     return pca, X, pca_loc, pca_kernels, kernels, loc
