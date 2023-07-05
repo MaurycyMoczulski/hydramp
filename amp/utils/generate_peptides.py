@@ -1,6 +1,27 @@
 import numpy as np
 import pandas as pd
 from amp.data_utils import sequence
+from keras import layers
+from keras import models as m
+
+def get_unique(x):
+    if x.shape[0] > 1:
+        return np.unique(x, axis=0)
+    else:
+        return x
+
+def get_z_sigma(encoder, x):
+    inputs = layers.Input(shape=(25,))
+    z_mean, z_sigma, z = encoder.output_tensor(inputs)
+    temp_encoder = m.Model(inputs, [z_mean, z_sigma, z])
+    _, z_sigma, _ = temp_encoder.predict(x) 
+    return np.exp(z_sigma / 2)
+
+def single_move_zeros(x):
+    width = len(x)
+    x = [y for y in x if y != 0]
+    x = np.pad(x, (0, width-len(x)))
+    return x                                                           
 
 def translate_generated_peptide(encoded_peptide):
     alphabet = list('ACDEFGHIKLMNPQRSTVWY')
